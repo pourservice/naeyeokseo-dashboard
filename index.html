@@ -481,6 +481,8 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
 .app-topbar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:var(--topbar-h);background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:0 26px;z-index:110;}
 .app-topbar .tb-burger{display:none;background:none;border:1px solid var(--border);border-radius:8px;width:38px;height:38px;cursor:pointer;color:var(--text);align-items:center;justify-content:center;}
 .app-topbar .tb-title{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.2px;}
+.app-topbar .tb-dash{background:var(--navy-800,#2a3550);color:#fff;border:none;border-radius:8px;font-size:12.5px;font-weight:600;padding:8px 13px;cursor:pointer;white-space:nowrap;flex-shrink:0;}
+.app-topbar .tb-dash:hover{filter:brightness(1.12);}
 .app-topbar .tb-search{flex:1;max-width:360px;position:relative;}
 .app-topbar .tb-search input{width:100%;padding:8px 12px 8px 34px;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--page-bg);}
 .app-topbar .tb-search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;stroke:var(--text-sub);fill:none;stroke-width:1.8;}
@@ -562,7 +564,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
   body.nav-open .app-sidebar{transform:translateX(0);}
   body.nav-open .app-scrim{display:block;}
 }
-@media(max-width:560px){#view-home .hero-stats{width:100%;}#view-home .kpi-row{grid-template-columns:1fr;}.app-topbar .tb-search{display:none;}.app-topbar .tb-user .nm,.app-topbar .tb-user .rl{display:none;}}
+@media(max-width:560px){#view-home .hero-stats{width:100%;}#view-home .kpi-row{grid-template-columns:1fr;}.app-topbar .tb-search{display:none;}.app-topbar .tb-user .nm,.app-topbar .tb-user .rl{display:none;}.app-topbar .tb-date{display:none;}.app-topbar .tb-title{display:none;}.app-topbar .tb-dash{margin-left:2px;}}
 
 /* ── 4) 인쇄: 셸 숨김 ── */
 @media print{body{padding:0!important;}.app-sidebar,.app-topbar,.app-scrim{display:none!important;}}
@@ -706,6 +708,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
   </button>
   <div class="tb-title" id="tbTitle">홈</div>
+  <button class="tb-dash" onclick="showView('dash')" title="검토 대시보드로 이동">📋 검토 대시보드</button>
   <div class="tb-search">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     <input type="text" id="tbSearch" placeholder="현장·발행이력 통합검색" onkeydown="if(event.key==='Enter')topSearch(this.value)">
@@ -4420,8 +4423,12 @@ function showView(v){
   try{ wfSyncBar(); }catch(e){}
   /* ── v6.9 셸 동기화: 사이드바 활성·톱바 제목·wf바 표시·홈 갱신 ── */
   try{ nfShellSync(v); }catch(e){}
+  try{ if(v){ var _h='#'+v; if(location.hash!==_h) history.replaceState(null,'',_h); } }catch(e){}
   window.scrollTo(0,0);
 }
+/* URL 해시로 화면 바로 열기 — 예: …/#dash → 검토 대시보드로 바로 이동 */
+function nfHashView(){ var h=''; try{ h=decodeURIComponent((location.hash||'').replace(/^#/,'')).trim().toLowerCase(); }catch(e){} var map={dash:'dash',dashboard:'dash','검토':'dash','검토대시보드':'dash',home:'home','홈':'home',estimate:'estimate','내역서':'estimate',cross:'cross','물량검증':'cross',master:'master',history:'history',final:'final'}; return map[h]||null; }
+window.addEventListener('hashchange', function(){ var v=nfHashView(); if(v){ try{ showView(v); }catch(e){} } });
 /* ============================================================
    v6.9 앱 셸 헬퍼 (홈·사이드바·톱바) — 기존 로직 미변경
    ============================================================ */
@@ -4566,7 +4573,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   /* ── v6.9: 최초 진입 화면을 홈으로 + 톱바 날짜 ── */
   try{ var _n=new Date(),_p=function(x){return String(x).padStart(2,'0');},_w=['일','월','화','수','목','금','토'][_n.getDay()];
        var _td=document.getElementById('tbDate'); if(_td) _td.textContent=_n.getFullYear()+'.'+_p(_n.getMonth()+1)+'.'+_p(_n.getDate())+' ('+_w+')'; }catch(e){}
-  try{ showView('home'); }catch(e){ console.error('home init',e); }
+  try{ var _hv=nfHashView(); showView(_hv||'home'); }catch(e){ console.error('home init',e); }
 });
 /* ===== 발행이력 / 스냅샷 (Firebase 이전용 v1 스키마) ===== */
 const HKEY='nf_history';
@@ -5668,15 +5675,15 @@ function openShare(){
   const cfg=nfReadCfg();
   document.getElementById('fbCfgIn').value = cfg?JSON.stringify(cfg,null,2):'';
   document.getElementById('shareState').textContent = nfCloud.on?'현재: 연결됨 (팀과 실시간 공유 중)':'현재: 미연결 (이 브라우저에만 저장)';
-  try{ document.getElementById('jandiHookIn').value = localStorage.getItem('nf_jandi_hook')||''; document.getElementById('jandiRelayIn').value = localStorage.getItem('nf_jandi_relay')||''; }catch(_){}
+  try{ document.getElementById('jandiHookIn').value = localStorage.getItem('nf_jandi_hook')||''; document.getElementById('jandiRelayIn').value = (localStorage.getItem('nf_jandi_relay')||'')||NF_RELAY_DEFAULT; }catch(_){}
   ov.classList.add('show');
 }
 function saveJandiSettings(){ try{ const h=((document.getElementById('jandiHookIn')||{}).value||'').trim(); const rl=((document.getElementById('jandiRelayIn')||{}).value||'').trim(); localStorage.setItem('nf_jandi_hook',h); localStorage.setItem('nf_jandi_relay',rl); }catch(_){} }
 function closeShare(){ saveJandiSettings(); const ov=document.getElementById('shareOverlay'); if(ov) ov.classList.remove('show'); }
 /* 잔디 알림 발송 — 팀원 @태그 시 검토 토픽으로 알림 */
 async function jandiNotify(bodyText, info){
-  let hook='', relay='';
-  try{ hook=(localStorage.getItem('nf_jandi_hook')||'').trim(); relay=(localStorage.getItem('nf_jandi_relay')||'').trim(); }catch(_){}
+  let hook='', relay=nfRelayUrl();
+  try{ hook=(localStorage.getItem('nf_jandi_hook')||'').trim(); }catch(_){}
   if(!hook) return false;
   const payload={ body:bodyText, connectColor:'#2a5ad3', connectInfo: info?[{title:(info.title||'검토 요청'), description:(info.desc||'')}]:[] };
   try{
@@ -5685,11 +5692,14 @@ async function jandiNotify(bodyText, info){
     return true;
   }catch(e){ return false; }
 }
+/* ★ 중계 서버(GAS) 기본 주소 — 코드에 내장해 모든 기기에서 자동 사용 (기기별 설정 없이 항상 기록) */
+const NF_RELAY_DEFAULT='https://script.google.com/macros/s/AKfycbxZDl2G6mxMXJwQOoxF2dc3UnCGpJM6lUh1EtvT5rwcdd-Es1nXYqTMfd1YXgAbY8_EHQ/exec';
+function nfRelayUrl(){ try{ const v=(localStorage.getItem('nf_jandi_relay')||'').trim(); if(v) return v; }catch(e){} return NF_RELAY_DEFAULT; }
 /* ---------- 구글시트 로그 (초안본 완료·최종본 완료 단계에서 기록) ---------- */
 async function sheetLog(r, stageLabel){
   if(!r) return false;
-  let relay=''; try{ relay=(localStorage.getItem('nf_jandi_relay')||'').trim(); }catch(_){}
-  if(!relay) return false;               /* 중계 서버(GAS) 없으면 조용히 패스 */
+  const relay=nfRelayUrl();
+  if(!relay) return false;               /* 중계 서버(GAS) 주소가 없으면 패스 */
   /* 요청사 → 업체(첫 공백 앞) / 담당자(나머지) */
   const reqTxt=(r.req||'').trim();
   let company=reqTxt, manager='';
@@ -5716,7 +5726,7 @@ async function jandiTest(){
   saveJandiSettings();
   const st=document.getElementById('jandiState');
   const hook=(localStorage.getItem('nf_jandi_hook')||'').trim();
-  const relay=(localStorage.getItem('nf_jandi_relay')||'').trim();
+  const relay=nfRelayUrl();
   if(!hook){ if(st){ st.textContent='웹훅 URL을 먼저 입력하세요.'; st.style.color='#d4433b'; } return; }
   if(st){ st.textContent='보내는 중…'; st.style.color=''; }
   await jandiNotify('🔔 POUR 검토 대시보드 테스트 알림입니다.', {title:'연결 테스트', desc:'이 메시지가 잔디 토픽에 보이면 정상입니다.'});
