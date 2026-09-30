@@ -5675,15 +5675,14 @@ function openShare(){
   const cfg=nfReadCfg();
   document.getElementById('fbCfgIn').value = cfg?JSON.stringify(cfg,null,2):'';
   document.getElementById('shareState').textContent = nfCloud.on?'현재: 연결됨 (팀과 실시간 공유 중)':'현재: 미연결 (이 브라우저에만 저장)';
-  try{ document.getElementById('jandiHookIn').value = localStorage.getItem('nf_jandi_hook')||''; document.getElementById('jandiRelayIn').value = (localStorage.getItem('nf_jandi_relay')||'')||NF_RELAY_DEFAULT; }catch(_){}
+  try{ document.getElementById('jandiHookIn').value = (localStorage.getItem('nf_jandi_hook')||'')||NF_JANDI_HOOK_DEFAULT; document.getElementById('jandiRelayIn').value = (localStorage.getItem('nf_jandi_relay')||'')||NF_RELAY_DEFAULT; }catch(_){}
   ov.classList.add('show');
 }
 function saveJandiSettings(){ try{ const h=((document.getElementById('jandiHookIn')||{}).value||'').trim(); const rl=((document.getElementById('jandiRelayIn')||{}).value||'').trim(); localStorage.setItem('nf_jandi_hook',h); localStorage.setItem('nf_jandi_relay',rl); }catch(_){} }
 function closeShare(){ saveJandiSettings(); const ov=document.getElementById('shareOverlay'); if(ov) ov.classList.remove('show'); }
 /* 잔디 알림 발송 — 팀원 @태그 시 검토 토픽으로 알림 */
 async function jandiNotify(bodyText, info){
-  let hook='', relay=nfRelayUrl();
-  try{ hook=(localStorage.getItem('nf_jandi_hook')||'').trim(); }catch(_){}
+  let hook=nfHookUrl(), relay=nfRelayUrl();
   if(!hook) return false;
   const payload={ body:bodyText, connectColor:'#2a5ad3', connectInfo: info?[{title:(info.title||'검토 요청'), description:(info.desc||'')}]:[] };
   try{
@@ -5695,6 +5694,9 @@ async function jandiNotify(bodyText, info){
 /* ★ 중계 서버(GAS) 기본 주소 — 코드에 내장해 모든 기기에서 자동 사용 (기기별 설정 없이 항상 기록) */
 const NF_RELAY_DEFAULT='https://script.google.com/macros/s/AKfycbxZDl2G6mxMXJwQOoxF2dc3UnCGpJM6lUh1EtvT5rwcdd-Es1nXYqTMfd1YXgAbY8_EHQ/exec';
 function nfRelayUrl(){ try{ const v=(localStorage.getItem('nf_jandi_relay')||'').trim(); if(v) return v; }catch(e){} return NF_RELAY_DEFAULT; }
+/* ★ 잔디 웹훅 기본 주소 — 코드에 내장해 모든 기기에서 태그 알림 자동 발송 */
+const NF_JANDI_HOOK_DEFAULT='https://wh.jandi.com/connect-api/webhook/26098605/814384fbf228bf77c59e40b38c795c1c';
+function nfHookUrl(){ try{ const v=(localStorage.getItem('nf_jandi_hook')||'').trim(); if(v) return v; }catch(e){} return NF_JANDI_HOOK_DEFAULT; }
 /* ---------- 구글시트 로그 (초안본 완료·최종본 완료 단계에서 기록) ---------- */
 async function sheetLog(r, stageLabel){
   if(!r) return false;
@@ -5725,7 +5727,7 @@ async function maybeSheetLog(r, newStatus){
 async function jandiTest(){
   saveJandiSettings();
   const st=document.getElementById('jandiState');
-  const hook=(localStorage.getItem('nf_jandi_hook')||'').trim();
+  const hook=nfHookUrl();
   const relay=nfRelayUrl();
   if(!hook){ if(st){ st.textContent='웹훅 URL을 먼저 입력하세요.'; st.style.color='#d4433b'; } return; }
   if(st){ st.textContent='보내는 중…'; st.style.color=''; }
@@ -6060,7 +6062,7 @@ async function postComment(){
   /* ★ @팀원 태그가 있으면 잔디 검토 토픽으로 알림 발송 */
   try{
     const tags=[...new Set((text.match(/@([가-힣A-Za-z0-9_]+)/g)||[]))];
-    if(tags.length && (localStorage.getItem('nf_jandi_hook')||'').trim()){
+    if(tags.length && nfHookUrl()){
       const body=tags.join(' ')+' 검토 요청 — '+(r.site||'(현장)');
       const desc=(author?('작성자: '+author+'\n'):'')+(text||'');
       jandiNotify(body, {title:'📋 '+(r.site||'현장')+' 검토 요청', desc:desc.slice(0,300)});
