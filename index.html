@@ -5405,7 +5405,7 @@ const STAGES=[
 ];
 const CHECK_ITEMS=[{key:'team',label:'팀원 검토'},{key:'lead',label:'팀장 검토'}];
 
-let reviews=[], lastAuthor='', TEAM=['주현진','한준엽','조재연','신수진','황상문','김영성','김성준'];
+let reviews=[], lastAuthor='', TEAM=['신수진','임채명','김영성','한준엽','조재연'];
 let currentDetailId=null, detailLinks=[];
 
 const $=s=>document.querySelector(s);
@@ -5429,6 +5429,8 @@ async function load(){
       localStorage.setItem('nf_app_ver', APP_VER);
     }
   }catch(e){}
+  /* 팀원 명단을 새 기본값(신수진·임채명·김영성·한준엽·조재연)으로 1회 초기화 — 이후 추가/편집분은 유지 */
+  try{ if(!localStorage.getItem('nf_team_reset_v2')){ localStorage.removeItem('wp_team'); localStorage.setItem('nf_team_reset_v2','1'); } }catch(e){}
   const raw=await store.get(KEY);
   try{ reviews = raw ? JSON.parse(raw) : null; }catch(e){ reviews=null; }
   if(!reviews){ reviews=SEED; }
@@ -5500,7 +5502,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-01-sync12';
+const APP_VER='2026-10-01-sync14';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -5895,10 +5897,12 @@ function buildChecklist(r){
       ${CHECK_ITEMS.map(it=>`<label class="cl-item"><input type="checkbox" data-chk="${it.key}" ${ch[it.key]?'checked':''}><span>${esc(it.label)}</span></label>`).join('')}
     </div>`;
   }
-  /* 완료 단계(초안본 완료·최종본 완료) — 저장 및 발송완료 단일 체크 */
-  const on=!!((r.checks&&r.checks[stg.key])||{}).sent;
+  /* 완료 단계(초안본 완료·최종본 완료) — 저장 및 발송완료 + 보낸사람 선택 */
+  const sent=(r.checks&&r.checks[stg.key])||{};
+  const on=!!sent.sent; const by=sent.by||'';
   return `<div class="checklist ${on?'all':''}">
-    <label class="cl-item"><input type="checkbox" data-sent="1" ${on?'checked':''}><span>저장 및 발송완료${on?' ✓':''}</span></label>
+    <label class="cl-item"><input type="checkbox" data-sent="1" ${on?'checked':''}><span>저장 및 발송완료${on?(' ✓'+(by?(' · 보낸사람 '+esc(by)):'')):''}</span></label>
+    ${on?'':`<div class="sentby-row" style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#5a6b7d;flex-wrap:wrap;"><span>보낸사람</span><select data-sentby style="padding:3px 7px;border:1px solid #d5dbe5;border-radius:6px;font-size:12px;">${[''].concat(TEAM).map(n=>`<option value="${esc(n)}"${n===lastAuthor?' selected':''}>${n||'선택'}</option>`).join('')}</select><span style="color:#9aa4b3;">선택 후 체크</span></div>`}
   </div>`;
 }
 function wireChecks(container,r){
@@ -5911,11 +5915,16 @@ function wireChecks(container,r){
   container.querySelectorAll('[data-sent]').forEach(cb=>{
     cb.addEventListener('mousedown',e=>e.stopPropagation());
     cb.addEventListener('click',e=>e.stopPropagation());
-    cb.addEventListener('change',e=>{e.stopPropagation();toggleSent(r,stg.key,cb.checked);});
+    cb.addEventListener('change',async e=>{e.stopPropagation();
+      if(cb.checked){ const sel=container.querySelector('[data-sentby]'); const by=sel?((sel.value||'').trim()):''; if(!by){ alert('보낸 사람을 먼저 선택해주세요.'); cb.checked=false; return; } await toggleSent(r,stg.key,true,by); }
+      else { await toggleSent(r,stg.key,false,''); }
+    });
   });
 }
-async function toggleSent(r,stageKey,val){
-  r.checks=r.checks||{}; r.checks[stageKey]=r.checks[stageKey]||{}; r.checks[stageKey].sent=val;
+async function toggleSent(r,stageKey,val,by){
+  r.checks=r.checks||{};
+  if(val){ r.checks[stageKey]={sent:true, by:by||'', ts:new Date().toISOString()}; }
+  else { r.checks[stageKey]={sent:false}; }
   render(); if(currentDetailId===r.id) renderDetail();
   await save();
 }
@@ -5964,6 +5973,7 @@ function render(){
   reviews.forEach(r=>{total++;if(r.status!=='done'){prog++;const dd=ddayInfo(r.due);if(dd&&dd.diff<=2)urgent++;}});
   $('#stTotal').textContent=total;$('#stProg').textContent=prog;$('#stUrgent').textContent=urgent;
   wireDnD(); updateModeBtn();
+  try{ if(window.renderHome) window.renderHome(); }catch(e){}   /* 대시보드가 바뀌면 홈 업무현황도 같이 갱신(단계변경·동기화 반영) */
 }
 /* 화면 크기 바뀌면(직접 선택 안 했을 때만) 자동 전환 */
 window.addEventListener('resize', (function(){ let t; return function(){ clearTimeout(t); t=setTimeout(function(){ try{ if(!localStorage.getItem(BOARD_MODE_KEY) && board){ render(); } }catch(e){} }, 200); }; })());
@@ -6225,7 +6235,7 @@ function renderDetail(){
     ${buildChecklist(r)}
     <div class="thread">${thread}</div>
     <div class="composer">
-      <div class="c-row"><input id="c_author" placeholder="이름" value=""><textarea id="c_text" placeholder="검토 의견·수정사항·메모 (계속 쌓입니다)"></textarea></div>
+      <div class="c-row"><select id="c_author" title="작성자">${[''].concat(TEAM).map(n=>`<option value="${esc(n)}"${n===lastAuthor?' selected':''}>${n||'작성자 선택'}</option>`).join('')}<option value="__add__">+ 이름 추가…</option></select><textarea id="c_text" placeholder="검토 의견·수정사항·메모 (계속 쌓입니다)"></textarea></div>
       <div class="staged" id="staged"></div>
       <div class="comp-tools">
         <span class="mention-menu"><button class="mini-btn" id="cTag">@ 태그</button><div class="mention-list" id="tagList"></div></span>
@@ -6248,6 +6258,7 @@ function renderDetail(){
   })();
   $('#cLink').onclick=()=>{const u=prompt('드라이브/공유 링크 URL:');if(u&&u.trim()){const n=prompt('표시 이름(선택):')||'';detailLinks.push({name:n.trim()||u.trim(),url:u.trim()});renderStaged();}};
   $('#cPost').onclick=postComment;
+  (function(){ const asel=$('#c_author'); if(!asel) return; asel.onchange=async()=>{ if(asel.value==='__add__'){ const nm=prompt('추가할 이름을 입력하세요:'); if(nm&&nm.trim()){ const v=nm.trim(); if(TEAM.indexOf(v)<0){ TEAM.push(v); try{ await store.set('wp_team',JSON.stringify(TEAM)); }catch(e){} } lastAuthor=v; } renderDetail(); } }; })();
   $('#detailModal').querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>setStageDetail(r,b.dataset.st));
   $('#detailModal').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delComment(r,b.dataset.del));
   wireChecks($('#detailModal'),r);
@@ -6310,7 +6321,7 @@ function exportExcel(){
   toast('엑셀 파일을 다운로드했습니다');
 }
 
-const MAX_ATTACH=30*1048576;   /* 댓글 첨부 최대 30MB */
+const MAX_ATTACH=50*1048576;   /* 댓글 첨부 최대 50MB */
 function nfReadDataUrl(file){ return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(fr.error);fr.readAsDataURL(file);}); }
 /* ===== 첨부파일을 Realtime Database에 저장(무료·카드 불필요). 큰 파일은 1MB씩 쪼개서 안정적으로 올림 ===== */
 async function nfRtdbUpload(file, reviewId){
