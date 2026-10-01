@@ -5417,6 +5417,17 @@ const EXTRA=[];
 
 /* ---------- load / save ---------- */
 async function load(){
+  /* ★ 버전 올라갈 때 기기마다 1회 로컬 청소 — 옛 예시카드·테스트카드·삭제표식 잔재를 비우고
+       공유 DB(클라우드)를 기준으로 다시 받는다. "로컬에만 남은 카드가 되살아나는" 문제 제거 */
+  try{
+    const sv=localStorage.getItem('nf_app_ver');
+    if(sv!==APP_VER){
+      localStorage.removeItem('wp_dashboard:v3');   // 로컬 보드 비움 → 클라우드에서 다시 수신
+      localStorage.removeItem('nf_deleted_ids');     // 옛 삭제표식(예시카드 s1~s4 등) 제거
+      localStorage.removeItem('nf_sync_ts');
+      localStorage.setItem('nf_app_ver', APP_VER);
+    }
+  }catch(e){}
   const raw=await store.get(KEY);
   try{ reviews = raw ? JSON.parse(raw) : null; }catch(e){ reviews=null; }
   if(!reviews){ reviews=SEED; }
