@@ -1293,7 +1293,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <button class="btn btn-primary" onclick="shareConnect()">연결</button>
   </div>
 </div></div>
-<input type="file" id="hiddenFile" style="display:none">
+<input type="file" id="hiddenFile" multiple style="display:none">
 <div id="toast"></div>
 
 
@@ -5492,7 +5492,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-01-sync7';
+const APP_VER='2026-10-01-sync9';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -5525,11 +5525,10 @@ const nfCloud={
     try{
       if(!firebase.apps.length) firebase.initializeApp(cfg);
       this.db=firebase.firestore();
-      /* 파이어베이스 스토리지(사진/첨부 업로드)는 버킷 CORS 미설정으로 막혀 있어 빨간 오류만 유발 → 아예 사용 안 함.
-         카드·댓글·발행이력은 전부 파이어스토어로 동기화되므로 영향 없음(첨부·현장사진은 각 PC에 로컬 보관). */
-      this.storage=null;
+      /* 스토리지: 큰 첨부(엑셀 등)를 팀원과 공유하려면 필요 → 사용. (버킷 CORS·규칙 설정이 되어 있어야 업로드 성공) */
+      try{ this.storage=firebase.storage(); }catch(e){ this.storage=null; }
       this.on=true; this._reconciled=false; this._synced=new Map(); this._removedIds=new Set(); this._firstCards=true; nfCloudStatus(); this.subscribe();
-      try{ setTimeout(function(){ try{ satFetchShared(currentSatKey()); }catch(_){}; try{ satShareAll(); }catch(_){} }, 1500); }catch(_){}
+      try{ setTimeout(function(){ try{ satFetchShared(currentSatKey()); }catch(_){}; try{ satShareAll(); }catch(_){} }, 1500); }catch(_){}   /* 팀 공유 연결 직후: 위성 공유본 받고 내 사진 올림 */
       return true;
     }catch(e){ console.error('[nfCloud] connect',e); this.on=false; nfCloudStatus(); toast('연결 실패: '+(e&&e.message||e)); return false; }
   },
@@ -6022,13 +6021,9 @@ let nfFileReg={}, nfFileSeq=0;
 function nfDownloadReg(id){ const f=nfFileReg[id]; nfDownloadFile(f); }
 window.nfDownloadReg=nfDownloadReg;
 function fileAnchor(f,cls,isLatest){
-  const isData=String(f.url||'').indexOf('data:')===0;
   const label=esc(f.name||f.url||'파일');
-  if(isData || !f.url){   /* data:URL 또는 로컬 파일 → Blob 다운로드(큰 파일도 안정적) */
-    const id='f'+(nfFileSeq++); nfFileReg[id]=f;
-    return `<a class="${cls}" href="#" onclick="event.preventDefault();event.stopPropagation();nfDownloadReg('${id}')" title="${esc(f.name||'파일')}">🔗 <span class="cn">${label}</span>${isLatest?' <span class="badge-latest">최신</span>':''}</a>`;
-  }
-  return `<a class="${cls}" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name||f.url)}">🔗 <span class="cn">${label}</span>${isLatest?' <span class="badge-latest">최신</span>':''}</a>`;
+  const id='f'+(nfFileSeq++); nfFileReg[id]=f;   /* 클릭 → 미리보기 창(엑셀 표/ PDF·이미지 보기 + 다운로드) */
+  return `<a class="${cls}" href="#" onclick="event.preventDefault();event.stopPropagation();nfPreviewReg('${id}')" title="${esc(f.name||'파일')}">📎 <span class="cn">${label}</span>${isLatest?' <span class="badge-latest">최신</span>':''}</a>`;
 }
 /* 팀 공유 동기화가 파일 URL을 비워도(Storage 미사용 시), 이 컴퓨터에 있던 원본 data:URL을 되살려 다운로드가 깨지지 않게 함 */
 function nfPreserveLocalFiles(oldR, newR){
@@ -6054,6 +6049,73 @@ function nfDownloadFile(f){
   const a=document.createElement('a'); a.href=url; if(url.indexOf('data:')===0){ a.download=name; } else { a.target='_blank'; a.rel='noopener'; } document.body.appendChild(a); a.click(); a.remove();
 }
 window.nfDownloadFile=nfDownloadFile;
+/* ===== 첨부파일 미리보기 창 (엑셀=표, PDF·이미지=미리보기, 그 외=다운로드 안내) ===== */
+function nfFileExt(name,url){ const s=String(name||url||'').toLowerCase().split('?')[0]; const m=s.match(/\.([a-z0-9]+)$/); return m?m[1]:''; }
+async function nfFileBytes(f){
+  const url=String(f.url||'');
+  if(url.indexOf('data:')===0){ const comma=url.indexOf(','); const bin=atob(url.slice(comma+1)); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i); return u8.buffer; }
+  const r=await fetch(url); if(!r.ok) throw new Error('fetch '+r.status); return await r.arrayBuffer();
+}
+function nfEnsurePreviewModal(){
+  let m=document.getElementById('filePreview'); if(m) return m;
+  m=document.createElement('div'); m.id='filePreview';
+  m.innerHTML='<div class="fp-card"><div class="fp-head"><span class="fp-title"></span><span class="fp-actions"><button class="fp-open">↗ 새 탭</button><button class="fp-dl">⬇ 다운로드</button><button class="fp-x">✕</button></span></div><div class="fp-body"></div></div>';
+  document.body.appendChild(m);
+  const css=document.createElement('style'); css.textContent=
+  '#filePreview{position:fixed;inset:0;background:rgba(20,26,36,.55);display:none;align-items:center;justify-content:center;z-index:99999;padding:20px;}'+
+  '#filePreview.show{display:flex;}'+
+  '#filePreview .fp-card{background:#fff;border-radius:12px;width:min(980px,96vw);height:min(86vh,900px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);}'+
+  '#filePreview .fp-head{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid #e6eaf0;}'+
+  '#filePreview .fp-title{font-weight:700;font-size:14px;color:#20262e;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'+
+  '#filePreview .fp-actions{display:flex;gap:6px;}'+
+  '#filePreview .fp-actions button{border:1px solid #d5dbe5;background:#f6f8fb;border-radius:7px;padding:5px 10px;font-size:12.5px;cursor:pointer;}'+
+  '#filePreview .fp-actions .fp-dl{background:#2a5ad3;color:#fff;border-color:#2a5ad3;font-weight:600;}'+
+  '#filePreview .fp-body{flex:1;overflow:auto;background:#fafbfc;}'+
+  '#filePreview .fp-load,#filePreview .fp-msg{padding:48px 24px;text-align:center;color:#6b7684;font-size:13px;line-height:1.7;}'+
+  '#filePreview .fp-tabs{position:sticky;top:0;background:#fff;border-bottom:1px solid #eee;padding:6px 8px;display:flex;gap:4px;flex-wrap:wrap;z-index:2;}'+
+  '#filePreview .fp-tabs button{border:1px solid #d5dbe5;background:#f6f8fb;border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer;}'+
+  '#filePreview .fp-tabs button.on{background:#2a5ad3;color:#fff;border-color:#2a5ad3;}'+
+  '#filePreview .fp-sheet{padding:10px;overflow:auto;}'+
+  '#filePreview .fp-sheet table{border-collapse:collapse;font-size:12px;background:#fff;}'+
+  '#filePreview .fp-sheet td,#filePreview .fp-sheet th{border:1px solid #d9e0ea;padding:3px 7px;white-space:nowrap;}'+
+  '#filePreview .fp-frame{width:100%;height:100%;border:0;background:#fff;}'+
+  '#filePreview .fp-img{display:block;max-width:100%;margin:12px auto;}';
+  document.head.appendChild(css);
+  m.querySelector('.fp-x').onclick=()=>m.classList.remove('show');
+  m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('show'); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape') m.classList.remove('show'); });
+  return m;
+}
+async function nfPreviewFile(f){
+  if(!f || !f.url){ toast('이 파일은 이 컴퓨터에 없습니다 — 원본 올린 PC에서 받거나 스토리지 설정이 필요합니다'); return; }
+  const m=nfEnsurePreviewModal(); const body=m.querySelector('.fp-body');
+  m.querySelector('.fp-title').textContent=f.name||'첨부파일';
+  m.querySelector('.fp-dl').onclick=()=>nfDownloadFile(f);
+  m.querySelector('.fp-open').onclick=()=>{ try{ window.open(f.url,'_blank','noopener'); }catch(e){} };
+  body.innerHTML='<div class="fp-load">미리보기 불러오는 중…</div>'; m.classList.add('show');
+  const ext=nfFileExt(f.name,f.url);
+  try{
+    if(['xlsx','xls','xlsm','csv'].indexOf(ext)>=0){
+      if(typeof XLSX==='undefined'){ body.innerHTML='<div class="fp-msg">엑셀 미리보기 모듈 로딩 중입니다 — 잠시 후 다시 누르거나 <b>다운로드</b>로 받아주세요.</div>'; return; }
+      const buf=await nfFileBytes(f); const wb=XLSX.read(buf,{type:'array'}); const SN=wb.SheetNames;
+      body.innerHTML='<div class="fp-tabs">'+SN.map((n,i)=>'<button data-si="'+i+'"'+(i===0?' class="on"':'')+'>'+esc(n)+'</button>').join('')+'</div><div class="fp-sheet"></div>';
+      const sd=body.querySelector('.fp-sheet');
+      const show=i=>{ try{ sd.innerHTML=XLSX.utils.sheet_to_html(wb.Sheets[SN[i]],{editable:false}); }catch(e){ sd.innerHTML='<div class="fp-msg">이 시트를 표로 그릴 수 없습니다 — 다운로드로 받아주세요.</div>'; } };
+      show(0);
+      body.querySelectorAll('.fp-tabs button').forEach(b=>b.onclick=()=>{ body.querySelectorAll('.fp-tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); show(+b.dataset.si); });
+    } else if(ext==='pdf'){
+      body.innerHTML='<iframe class="fp-frame" src="'+esc(f.url)+'"></iframe>';
+    } else if(['png','jpg','jpeg','gif','webp','bmp','svg'].indexOf(ext)>=0){
+      body.innerHTML='<img class="fp-img" src="'+esc(f.url)+'">';
+    } else {
+      body.innerHTML='<div class="fp-msg">이 형식('+(ext||'파일')+')은 화면 미리보기를 지원하지 않습니다.<br>위 <b>⬇ 다운로드</b>로 받아서 열어주세요.</div>';
+    }
+  }catch(e){ console.error('[preview]',e);
+    body.innerHTML='<div class="fp-msg">미리보기를 불러오지 못했습니다.<br>(다른 PC가 올린 파일은 파이어베이스 스토리지 설정이 끝나면 미리보기가 됩니다.)<br>지금은 위 <b>⬇ 다운로드</b> 또는 <b>↗ 새 탭</b>으로 열어주세요.</div>';
+  }
+}
+function nfPreviewReg(id){ nfPreviewFile(nfFileReg[id]); }
+window.nfPreviewReg=nfPreviewReg; window.nfPreviewFile=nfPreviewFile;
 function downloadLatest(r){
   const f=latestFile(r);
   if(!f){ toast('아직 올린 파일이 없습니다 — 카드의 댓글에서 파일/드라이브 링크를 올려주세요'); return; }
@@ -6134,7 +6196,7 @@ function renderDetail(){
       <div class="staged" id="staged"></div>
       <div class="comp-tools">
         <span class="mention-menu"><button class="mini-btn" id="cTag">@ 태그</button><div class="mention-list" id="tagList"></div></span>
-        <button class="mini-btn" id="cFile">📎 파일 (≤1.5MB)</button>
+        <button class="mini-btn" id="cFile">📎 파일 첨부 (≤30MB · 드래그 OK)</button>
         <button class="mini-btn" id="cLink">🔗 드라이브 링크</button>
         <button class="btn btn-primary" id="cPost" style="margin-left:auto">댓글 등록</button>
       </div>
@@ -6145,6 +6207,12 @@ function renderDetail(){
   if($('#dNotesCancel')) $('#dNotesCancel').onclick=()=>{ detailNotesEdit=false; renderDetail(); };
   if($('#dNotesSave')) $('#dNotesSave').onclick=async()=>{ r.notes=($('#d_notes').value||'').trim(); detailNotesEdit=false; await save(); renderDetail(); render(); toast('특이사항을 저장했어요.'); };
   $('#cFile').onclick=()=>$('#hiddenFile').click();
+  /* 댓글칸에 파일 드래그&드롭 → 바로 첨부(스토리지 업로드) */
+  (function(){ const comp=$('#detailModal') && $('#detailModal').querySelector('.composer'); if(!comp) return;
+    comp.addEventListener('dragover',e=>{ e.preventDefault(); comp.style.outline='2px dashed #2a5ad3'; comp.style.outlineOffset='3px'; comp.style.background='#f1f6f9'; });
+    comp.addEventListener('dragleave',e=>{ if(!comp.contains(e.relatedTarget)){ comp.style.outline=''; comp.style.background=''; } });
+    comp.addEventListener('drop',async e=>{ e.preventDefault(); comp.style.outline=''; comp.style.background=''; const fs=Array.from((e.dataTransfer&&e.dataTransfer.files)||[]); for(const f of fs){ await attachCommentFile(f); } });
+  })();
   $('#cLink').onclick=()=>{const u=prompt('드라이브/공유 링크 URL:');if(u&&u.trim()){const n=prompt('표시 이름(선택):')||'';detailLinks.push({name:n.trim()||u.trim(),url:u.trim()});renderStaged();}};
   $('#cPost').onclick=postComment;
   $('#detailModal').querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>setStageDetail(r,b.dataset.st));
@@ -6209,13 +6277,34 @@ function exportExcel(){
   toast('엑셀 파일을 다운로드했습니다');
 }
 
-$('#hiddenFile').onchange=async function(){
-  const file=this.files[0]; this.value='';
-  if(!file)return;
-  if(file.size>MAX_EMBED){toast('1.5MB 초과 — 드라이브에 올리고 🔗 링크로 추가하세요');return;}
-  const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(fr.error);fr.readAsDataURL(file);});
-  detailLinks.push({name:file.name,url:dataUrl}); renderStaged(); toast('파일 추가됨');
-};
+const MAX_ATTACH=30*1048576;   /* 댓글 첨부 최대 30MB (스토리지 업로드) */
+function nfReadDataUrl(file){ return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(fr.error);fr.readAsDataURL(file);}); }
+async function nfUploadAttach(file, reviewId){
+  const safe=(file.name||'file').replace(/[^\w.\-가-힣]/g,'_');
+  const ref=nfCloud.storage.ref().child('attach/'+(reviewId||'misc')+'/'+Date.now()+'_'+encodeURIComponent(safe));
+  const snap=await ref.put(file);                 /* File 직접 업로드(대용량 지원) */
+  return await snap.ref.getDownloadURL();
+}
+async function attachCommentFile(file){
+  if(!file) return;
+  if(file.size>MAX_ATTACH){ toast(file.name+' ('+(file.size/1048576).toFixed(1)+'MB): 30MB를 넘습니다'); return; }
+  /* 스토리지 사용 가능 → 업로드(큰 파일·팀 공유 OK, 카드에는 링크만 저장) */
+  if(nfCloud.on && nfCloud.storage){
+    toast('⬆ '+file.name+' 업로드 중…');
+    try{
+      const url=await nfUploadAttach(file, currentDetailId);
+      detailLinks.push({name:file.name, url:url, size:file.size}); renderStaged(); toast('✓ '+file.name+' 첨부됨');
+      return;
+    }catch(e){ console.error('[attach] upload',e);
+      if(file.size<=MAX_EMBED){ try{ const d=await nfReadDataUrl(file); detailLinks.push({name:file.name,url:d}); renderStaged(); toast('첨부됨(이 PC 전용 — 팀 공유하려면 스토리지 설정 필요)'); return; }catch(_){ } }
+      toast('업로드 실패 — 파이어베이스 스토리지 설정 필요(또는 🔗 드라이브 링크 이용)'); return;
+    }
+  }
+  /* 오프라인/스토리지 없음 → 작은 파일만 이 PC에 인라인 */
+  if(file.size<=MAX_EMBED){ try{ const d=await nfReadDataUrl(file); detailLinks.push({name:file.name,url:d}); renderStaged(); toast('첨부됨'); }catch(_){ toast('첨부 실패'); } }
+  else{ toast('큰 파일은 팀 공유 연결 + 스토리지 설정 후 첨부 가능 (또는 🔗 드라이브 링크)'); }
+}
+$('#hiddenFile').onchange=async function(){ const files=Array.from(this.files||[]); this.value=''; for(const f of files){ await attachCommentFile(f); } };
 
 /* ---------- add / edit ---------- */
 function fillStageSelect(){$('#f_status').innerHTML=STAGES.map(s=>`<option value="${s.key}">${s.label}</option>`).join('');}
