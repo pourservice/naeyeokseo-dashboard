@@ -5492,7 +5492,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-01-sync2';
+const APP_VER='2026-10-01-sync3';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -5572,18 +5572,11 @@ const nfCloud={
   async push(){
     if(!this.on || this._busy) return; this._busy=true;
     try{
-      /* 첨부 오프로드·공유스토어 번들은 트랜잭션 밖에서 준비(스토리지 업로드는 트랜잭션 안에서 하면 안 됨) */
       const clean=await this._offload(reviews);
       const delLocal=nfDelIds().map(String);
-      const stores=nfCollectStores();
-      let storesField={ stores:stores };
-      const bundle=JSON.stringify(stores);
-      if(bundle.length>700000 && this.storage){
-        try{ const sref=this.storage.ref().child('shared/stores.json'); await sref.putString(bundle,'raw',{contentType:'application/json'}); storesField={ storesUrl:await sref.getDownloadURL() }; }
-        catch(e){ storesField={ stores:stores }; }
-      }
       const ref=this.ref();
-      /* 트랜잭션: 원격 최신본을 읽어 '원격 ∪ 로컬'로 병합 후 저장 → 다른 기기 카드를 덮어쓰지 않음(무손실). 충돌 시 자동 재시도 */
+      /* 1) 카드(핵심)만 먼저 저장 — 스토리지/공유스토어와 완전 분리. 그쪽(firebasestorage CORS 등)이 막혀도 카드는 무조건 저장됨
+         트랜잭션: 원격 최신본을 읽어 '원격 ∪ 로컬'로 병합 → 다른 기기 카드 안 덮어씀(무손실), 충돌 시 자동 재시도 */
       await this.db.runTransaction(async tx=>{
         const snap=await tx.get(ref);
         const cur=(snap.exists && snap.data())||{};
@@ -5591,13 +5584,31 @@ const nfCloud={
         const delSet=new Set([].concat(Array.isArray(cur.deletedIds)?cur.deletedIds.map(String):[], delLocal));
         const mergedReviews=nfMergeReviews(remoteReviews, clean, delSet);
         const remoteVer=(cur && cur.appVer)?String(cur.appVer):'';
-        const appVer=(remoteVer>APP_VER)?remoteVer:APP_VER;   /* 버전은 내리지 않음(항상 최신 유지) */
-        const payload=Object.assign({ reviews:mergedReviews, deletedIds:[...delSet], updatedAt:Date.now(), appVer:appVer }, storesField);
-        tx.set(ref, payload);
+        const appVer=(remoteVer>APP_VER)?remoteVer:APP_VER;   /* 버전은 내리지 않음 */
+        tx.set(ref, { reviews:mergedReviews, deletedIds:[...delSet], updatedAt:Date.now(), appVer:appVer }, { merge:true });
       });
+      /* 2) 공유 스토어(발행이력·단가 등)는 best-effort 별도 저장 — 커도/스토리지가 막혀도 카드엔 영향 없음(fire-and-forget) */
+      this._pushStores(ref).catch(e=>{ try{ console.warn('[nfCloud] stores skip', (e&&e.message)||e); }catch(_){} });
     }
     catch(e){ console.error('[nfCloud] push',e); toast('공유 저장 오류: '+(e&&e.code||e&&e.message||e)); }
     this._busy=false;
+  },
+  async _pushStores(ref){
+    const stores=nfCollectStores();
+    const bundle=JSON.stringify(stores);
+    if(bundle.length>800000){
+      /* 문서 1MB 제한 회피: 큰 번들은 스토리지로 오프로드. 스토리지가 막혀 있으면 이번 스토어 저장은 생략(카드는 이미 저장됨) */
+      if(this.storage){
+        try{
+          const sref=this.storage.ref().child('shared/stores.json');
+          await sref.putString(bundle,'raw',{contentType:'application/json'});
+          const url=await sref.getDownloadURL();
+          await ref.set({ storesUrl:url, stores:firebase.firestore.FieldValue.delete() }, { merge:true });
+        }catch(e){ /* 스토리지 불가 → 생략 */ }
+      }
+      return;
+    }
+    await ref.set({ stores:stores, storesUrl:firebase.firestore.FieldValue.delete() }, { merge:true });
   },
   async _offload(rv){   // 첨부 data:URL → Storage 업로드(문서 1MB 제한 회피). 없으면 로컬 전용 처리
     const out=JSON.parse(JSON.stringify(rv));
