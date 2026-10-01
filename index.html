@@ -5492,7 +5492,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-01-sync3';
+const APP_VER='2026-10-01-sync5';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -5514,7 +5514,10 @@ function nfParseCfg(text){
   }catch(e){ return null; }
 }
 const nfCloud={
-  on:false, db:null, storage:null, _unsub:null, _seeded:false, _busy:false, _reconciled:false, _applying:false,
+  on:false, db:null, storage:null, _unsub:null, _unsubCards:null, _unsubStores:null,
+  _seeded:false, _busy:false, _dirty:false, _reconciled:false, _applying:false,
+  _synced:new Map(),   /* id -> 마지막으로 서버에 쓴 카드 JSON (변경분만 저장하기 위한 기준) */
+  _pending:new Set(),  /* 방금 만들어 아직 서버 확인 전인 로컬 카드 id (스냅샷 지연에도 안 사라지게) */
   async connect(cfg){
     cfg=cfg||nfReadCfg(); if(!cfg) return false;
     if(typeof firebase==='undefined'){ toast('Firebase 로드 실패 — 인터넷 연결 확인'); return false; }
@@ -5522,78 +5525,114 @@ const nfCloud={
       if(!firebase.apps.length) firebase.initializeApp(cfg);
       this.db=firebase.firestore();
       try{ this.storage=firebase.storage(); }catch(e){ this.storage=null; }
-      this.on=true; this._reconciled=false; nfCloudStatus(); this.subscribe();
-      try{ setTimeout(function(){ try{ satFetchShared(currentSatKey()); }catch(_){}; try{ satShareAll(); }catch(_){} }, 1500); }catch(_){}   /* ★ 팀 공유 연결 직후: 공유본 받아오고 내 사진도 올림 */
+      this.on=true; this._reconciled=false; this._synced=new Map(); this._pending=new Set(); nfCloudStatus(); this.subscribe();
+      try{ setTimeout(function(){ try{ satFetchShared(currentSatKey()); }catch(_){}; try{ satShareAll(); }catch(_){} }, 1500); }catch(_){}
       return true;
     }catch(e){ console.error('[nfCloud] connect',e); this.on=false; nfCloudStatus(); toast('연결 실패: '+(e&&e.message||e)); return false; }
   },
-  disconnect(){ try{ this._unsub&&this._unsub(); }catch(e){} this._unsub=null; this.on=false; this._seeded=false; this._reconciled=false; this._applying=false; nfCloudStatus(); },
-  ref(){ return this.db.collection('pour_dashboard').doc('board'); },
+  disconnect(){ try{ this._unsub&&this._unsub(); }catch(e){} try{ this._unsubCards&&this._unsubCards(); }catch(e){} try{ this._unsubStores&&this._unsubStores(); }catch(e){}
+    this._unsub=null; this._unsubCards=null; this._unsubStores=null; this.on=false; this._seeded=false; this._reconciled=false; this._applying=false; nfCloudStatus(); },
+  ref(){ return this.db.collection('pour_dashboard').doc('board'); },          /* 메타(appVer)만 담는 작은 문서 */
+  cardsRef(){ return this.db.collection('pour_cards'); },                      /* ★ 카드 1장 = 문서 1개 (문서당 1MB라 사실상 무제한 확장) */
+  storesRef(){ return this.db.collection('pour_dashboard').doc('stores'); },   /* 공유데이터(발행이력·단가 등) 별도 문서 */
   subscribe(){
     if(!this.on) return;
+    /* (A) 메타 문서: 새 버전 자동감지 + 최초 reconcile */
     try{ this._unsub&&this._unsub(); }catch(e){}
-    this._unsub=this.ref().onSnapshot(async snap=>{
-      nfCloud._syncErrShown=false;   /* 정상 수신 시 오류 표시 리셋 */
-      if(!snap.exists){ if(!this._seeded){ this._seeded=true; this.push(); } return; }
-      const d=snap.data();
-      try{ if(d && d.appVer) nfAutoUpdate(d.appVer); }catch(e){}   /* 새 버전 배포 감지 → 옛 캐시 PC 자동 최신화 */
-      if(d && Array.isArray(d.reviews)){
-        this._seeded=true;
-        const _prev=reviews;
-        nfMergeDelIds(d.deletedIds);                       /* 원격 삭제표식 → 로컬 반영(다른 기기의 삭제 전파) */
-        const delSet=new Set(nfDelIds());
-        const remoteReviews=d.reviews.filter(r=>!(r&&r.id!=null && delSet.has(String(r.id))));
-        const remoteIds=new Set(remoteReviews.map(r=>r&&r.id!=null?String(r.id):null));
-        /* 아직 클라우드에 안 올라간 로컬 신규 카드는 유지 — 스냅샷이 내 push보다 먼저 와도 카드가 사라지지 않게 */
-        const localPending=(_prev||[]).filter(r=>r&&r.id!=null && !remoteIds.has(String(r.id)) && !delSet.has(String(r.id)));
-        reviews=remoteReviews.concat(localPending); nfPreserveLocalFiles(_prev, reviews); normalizeReviews();
-        try{ store.set(KEY, JSON.stringify(reviews)); }catch(e){}
-        try{ render(); if(typeof currentDetailId!=='undefined' && currentDetailId) renderDetail(); }catch(e){}
-      }
-      /* 공유 스토어(발행이력·단가·안내문구 등) 병합 */
-      try{
-        let stores=d && d.stores;
-        if(!stores && d && d.storesUrl){ try{ stores=await (await fetch(d.storesUrl)).json(); }catch(e){} }
-        if(stores) nfApplyStores(stores);
-      }catch(e){ console.error('[nfCloud] stores recv',e); }
-      /* 최초 1회 로컬 데이터를 클라우드로 합집합 업로드(기존 이력 올리기) */
+    this._unsub=this.ref().onSnapshot(snap=>{
+      const d=snap.exists?snap.data():null;
+      try{ if(d && d.appVer) nfAutoUpdate(d.appVer); }catch(e){}
       if(!this._reconciled){ this._reconciled=true; nfPushSoon(); }
-    }, err=>{ console.error('[nfCloud] snapshot',err);
+    }, err=>{});
+    /* (B) ★ 카드 컬렉션 실시간 수신 — 카드별 문서를 모아 reviews 재구성 */
+    try{ this._unsubCards&&this._unsubCards(); }catch(e){}
+    this._unsubCards=this.cardsRef().onSnapshot(snap=>{
+      nfCloud._syncErrShown=false;
+      this._seeded=true;
+      const _prev=reviews;
+      const remoteMap=new Map();
+      snap.forEach(doc=>{ const c=doc.data(); if(c && c.id!=null) remoteMap.set(String(doc.id), c); });
+      /* 변경 감지 기준을 원격 현재값으로 갱신 */
+      this._synced=new Map(); remoteMap.forEach((c,id)=>{ this._synced.set(id, JSON.stringify(c)); });
+      /* 서버에 확인된 pending 은 해제 */
+      Array.from(this._pending).forEach(id=>{ if(remoteMap.has(id)) this._pending.delete(id); });
+      /* reviews = 원격 전체 + (아직 서버 미확인) 로컬 신규 카드만. 원격에서 사라진 카드는 삭제된 것이므로 떨어뜨림(표식 불필요) */
+      const next=[]; remoteMap.forEach(c=>next.push(c));
+      (_prev||[]).forEach(r=>{ if(r && r.id!=null){ const id=String(r.id); if(!remoteMap.has(id) && this._pending.has(id)) next.push(r); } });
+      reviews=next; nfPreserveLocalFiles(_prev, reviews); normalizeReviews();
+      try{ store.set(KEY, JSON.stringify(reviews)); }catch(e){}
+      try{ render(); if(typeof currentDetailId!=='undefined' && currentDetailId) renderDetail(); }catch(e){}
+    }, err=>{ console.error('[nfCloud] cards snapshot',err);
       const code=(err&&err.code)||String(err||'');
       if(nfCloud._syncErrShown) return; nfCloud._syncErrShown=true;
       if(code==='permission-denied'){
         toast('동기화 권한 오류 — Firebase 보안규칙 확인 필요');
-        try{ alert('팀 공유 동기화가 권한 오류(permission-denied)로 막혔어요.\n\n대개 Firestore를 "테스트 모드"로 시작한 경우 30일 뒤 자동으로 막혀서 생겨요.\n\n[해결] Firebase 콘솔에서\n① Firestore Database → 규칙 → 아래 규칙으로 교체 후 [게시]\n② Storage → 규칙 → 아래 규칙으로 교체 후 [게시]\n\n규칙 내용은 담당자에게 전달드린 안내(또는 채팅)를 확인하세요.\n\n지금은 이 브라우저에 계속 저장되며, 규칙을 고치면 자동으로 다시 동기화됩니다.'); }catch(_){}
+        try{ alert('팀 공유 동기화가 권한 오류(permission-denied)로 막혔어요.\n\n대개 Firestore를 "테스트 모드"로 시작한 경우 30일 뒤 자동으로 막혀서 생겨요.\n\n[해결] Firebase 콘솔 → Firestore Database → 규칙 → 모두 허용 규칙으로 교체 후 [게시].\n\n지금은 이 브라우저에 계속 저장되며, 규칙을 고치면 자동으로 다시 동기화됩니다.'); }catch(_){}
       } else {
         toast('동기화 오류('+code+') — 네트워크 확인 후 자동 재시도됩니다 (지금은 이 브라우저에 저장됨)');
       }
     });
+    /* (C) 공유데이터(발행이력·단가·안내문구 등) — 별도 문서 실시간 수신 */
+    try{ this._unsubStores&&this._unsubStores(); }catch(e){}
+    this._unsubStores=this.storesRef().onSnapshot(async snap=>{
+      try{
+        if(!snap.exists) return;
+        const sd=snap.data()||{};
+        let stores=sd.stores;
+        if(!stores && sd.storesUrl){ try{ stores=await (await fetch(sd.storesUrl)).json(); }catch(e){} }
+        if(stores) nfApplyStores(stores);
+      }catch(e){ console.error('[nfCloud] stores recv',e); }
+    }, err=>{});
   },
   async push(){
-    if(!this.on || this._busy) return; this._busy=true;
+    if(!this.on) return;
+    if(this._busy){ this._dirty=true; return; }   /* 저장 중에 또 바뀌면 끝나고 한 번 더 */
+    this._busy=true; this._dirty=false;
     try{
-      const clean=await this._offload(reviews);
-      const delLocal=nfDelIds().map(String);
-      const ref=this.ref();
-      /* 1) 카드(핵심)만 먼저 저장 — 스토리지/공유스토어와 완전 분리. 그쪽(firebasestorage CORS 등)이 막혀도 카드는 무조건 저장됨
-         트랜잭션: 원격 최신본을 읽어 '원격 ∪ 로컬'로 병합 → 다른 기기 카드 안 덮어씀(무손실), 충돌 시 자동 재시도 */
-      await this.db.runTransaction(async tx=>{
-        const snap=await tx.get(ref);
-        const cur=(snap.exists && snap.data())||{};
-        const remoteReviews=Array.isArray(cur.reviews)?cur.reviews:[];
-        const delSet=new Set([].concat(Array.isArray(cur.deletedIds)?cur.deletedIds.map(String):[], delLocal));
-        const mergedReviews=nfMergeReviews(remoteReviews, clean, delSet);
-        const remoteVer=(cur && cur.appVer)?String(cur.appVer):'';
-        const appVer=(remoteVer>APP_VER)?remoteVer:APP_VER;   /* 버전은 내리지 않음 */
-        tx.set(ref, { reviews:mergedReviews, deletedIds:[...delSet], updatedAt:Date.now(), appVer:appVer }, { merge:true });
-      });
-      /* 2) 공유 스토어(발행이력·단가 등)는 best-effort 별도 저장 — 커도/스토리지가 막혀도 카드엔 영향 없음(fire-and-forget) */
-      this._pushStores(ref).catch(e=>{ try{ console.warn('[nfCloud] stores skip', (e&&e.message)||e); }catch(_){} });
+      await this._syncCards();
+      try{ await this.ref().set({ appVer:APP_VER, updatedAt:Date.now() }, { merge:true }); }catch(e){}
+      this._pushStores().catch(e=>{ try{ console.warn('[nfCloud] stores skip', (e&&e.message)||e); }catch(_){} });
     }
     catch(e){ console.error('[nfCloud] push',e); toast('공유 저장 오류: '+(e&&e.code||e&&e.message||e)); }
     this._busy=false;
+    if(this._dirty){ this._dirty=false; try{ this.push(); }catch(e){} }   /* 밀린 변경 반영 */
   },
-  async _pushStores(ref){
+  async _syncCards(){
+    const clean=await this._offload(reviews);            /* 첨부 data:URL → 스토리지(막히면 로컬전용) */
+    const desired=new Map();
+    (clean||[]).forEach(c=>{ if(c && c.id!=null) desired.set(String(c.id), c); });
+    /* 1) 추가·변경된 카드만 각자 문서에 저장 (카드별 트랜잭션 — 같은 카드 동시수정 시 댓글 합집합 보존) */
+    for(const ent of desired){
+      const id=ent[0], card=ent[1];
+      const j=JSON.stringify(card);
+      if(this._synced.get(id)===j) continue;             /* 안 바뀐 카드는 건너뜀 → 평소엔 바뀐 1장만 씀 */
+      this._pending.add(id);
+      try{ await this._writeCard(id, card); this._synced.set(id, j); }
+      catch(e){ console.error('[nfCloud] writeCard',id,(e&&e.code)||e); }
+    }
+    /* 2) 로컬에서 사라진 카드 → 서버 문서 삭제 (삭제표식 불필요) */
+    for(const id of Array.from(this._synced.keys())){
+      if(!desired.has(id)){
+        try{ await this.cardsRef().doc(id).delete(); this._synced.delete(id); this._pending.delete(id); }
+        catch(e){ console.error('[nfCloud] delCard',id,(e&&e.code)||e); }
+      }
+    }
+  },
+  async _writeCard(id, card){
+    const dref=this.cardsRef().doc(id);
+    await this.db.runTransaction(async tx=>{
+      const snap=await tx.get(dref);
+      let merged=card;
+      if(snap.exists){
+        const rem=snap.data()||{};
+        merged=Object.assign({}, rem, card);
+        merged.comments=nfMergeComments(rem.comments, card.comments);   /* 양쪽 기기 댓글 모두 보존 */
+      }
+      tx.set(dref, merged);
+    });
+  },
+  async _pushStores(){
+    const dref=this.storesRef();                 /* 별도 문서(pour_dashboard/stores) */
     const stores=nfCollectStores();
     const bundle=JSON.stringify(stores);
     if(bundle.length>800000){
@@ -5603,12 +5642,12 @@ const nfCloud={
           const sref=this.storage.ref().child('shared/stores.json');
           await sref.putString(bundle,'raw',{contentType:'application/json'});
           const url=await sref.getDownloadURL();
-          await ref.set({ storesUrl:url, stores:firebase.firestore.FieldValue.delete() }, { merge:true });
+          await dref.set({ storesUrl:url, stores:firebase.firestore.FieldValue.delete() }, { merge:true });
         }catch(e){ /* 스토리지 불가 → 생략 */ }
       }
       return;
     }
-    await ref.set({ stores:stores, storesUrl:firebase.firestore.FieldValue.delete() }, { merge:true });
+    await dref.set({ stores:stores, storesUrl:firebase.firestore.FieldValue.delete() }, { merge:true });
   },
   async _offload(rv){   // 첨부 data:URL → Storage 업로드(문서 1MB 제한 회피). 없으면 로컬 전용 처리
     const out=JSON.parse(JSON.stringify(rv));
