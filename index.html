@@ -3104,7 +3104,7 @@ window.satImagesPersist=satImagesPersist;
    · 첨부파일과 동일하게 Storage(sat/<현장id>/…jpg)에 올리고 URL만 Firestore(pour_sat/<현장id>)에 기록
    · 저장(발행)된 현장만 공유 — draft는 다른 기기에서 식별 불가하므로 로컬만 유지 */
 function satSigKey(sig){ let h=5381; const s=String(sig); for(let i=0;i<s.length;i++){ h=((h<<5)+h+s.charCodeAt(i))>>>0; } return 'k'+h.toString(36); }
-function satTeamOn(){ const c=(typeof window!=='undefined')?window.nfCloud:null; return !!(c && c.on && c.storage && c.db); }
+function satTeamOn(){ const c=(typeof window!=='undefined')?window.nfCloud:null; return !!(c && c.on && c.rtdb && c.db); }
 function satShareNote(){ if(!satTeamOn()) return ''; return (currentSatKey()==='__draft__') ? ' <span class="t-sub" style="color:#2a5ad3;">· 🔗 발행하면 위성사진도 팀에 공유돼요</span>' : ' <span class="t-sub" style="color:#2a5ad3;">· 🔗 팀 공유 켜짐 — 위성사진 자동 공유</span>'; }
 async function satShareAll(){
   if(!satTeamOn()) return;
@@ -3115,8 +3115,7 @@ async function satShareAll(){
     const val=sat[sig]; if(typeof val!=='string') continue;
     if(crossState.satShareUrls[sig]) continue;
     if(/^https?:/i.test(val)){ crossState.satShareUrls[sig]=val; continue; }
-    try{ const ref=window.nfCloud.storage.ref().child('sat/'+key+'/'+satSigKey(sig)+'.jpg');
-         await ref.putString(val,'data_url'); crossState.satShareUrls[sig]=await ref.getDownloadURL(); }
+    try{ crossState.satShareUrls[sig]=await window.nfCloud._rtdbUploadDataUrl(val, satSigKey(sig)+'.jpg', 'sat_'+key); }
     catch(e){ /* 업로드 실패 → 다음 기회에 재시도 */ }
   }
   const items=Object.keys(crossState.satShareUrls).filter(sig=>sat[sig]).map(sig=>({sig, url:crossState.satShareUrls[sig]}));
@@ -3131,7 +3130,12 @@ async function satFetchShared(key){
     if(!crossState.sat) crossState.sat={};
     if(!crossState.satShareUrls) crossState.satShareUrls={};
     let added=0;
-    items.forEach(it=>{ if(it&&it.sig&&it.url){ crossState.satShareUrls[it.sig]=it.url; if(!crossState.sat[it.sig]){ crossState.sat[it.sig]=it.url; added++; } } });
+    for(const it of items){ if(it&&it.sig&&it.url){ crossState.satShareUrls[it.sig]=it.url;
+      if(!crossState.sat[it.sig]){
+        let src=it.url;
+        if(String(src).indexOf('rtdb:')===0){ try{ src=await window.nfCloud._rtdbFetchDataUrl(String(src).slice(5)); }catch(_){ continue; } }   /* RTDB 키 → 실제 이미지(dataURL)로 변환해야 <img>에 보임 */
+        crossState.sat[it.sig]=src; added++;
+      } } }
     if(added){ try{ satImagesPersist(); }catch(_){}; try{ crossRenderResults(); }catch(_){} }
   }catch(e){}
 }
@@ -5502,7 +5506,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-01-sync14';
+const APP_VER='2026-10-01-sync16';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -5535,7 +5539,7 @@ const nfCloud={
     try{
       if(!firebase.apps.length) firebase.initializeApp(cfg);
       this.db=firebase.firestore();
-      try{ this.storage=firebase.storage(); }catch(e){ this.storage=null; }
+      this.storage=null;   /* Cloud Storage 미사용(Blaze 요금제 필요) — 모든 첨부·공유는 Realtime Database 사용 */
       try{ this.rtdb=firebase.database(); }catch(e){ this.rtdb=null; }   /* 첨부파일(엑셀 등)은 Realtime Database에 저장 — 무료, 카드 불필요 */
       this.on=true; this._reconciled=false; this._synced=new Map(); this._removedIds=new Set(); this._firstCards=true; nfCloudStatus(); this.subscribe();
       try{ setTimeout(function(){ try{ satFetchShared(currentSatKey()); }catch(_){}; try{ satShareAll(); }catch(_){} }, 1500); }catch(_){}   /* 팀 공유 연결 직후: 위성 공유본 받고 내 사진 올림 */
@@ -5598,7 +5602,7 @@ const nfCloud={
         if(!snap.exists) return;
         const sd=snap.data()||{};
         let stores=sd.stores;
-        if(!stores && sd.storesUrl){ try{ stores=await (await fetch(sd.storesUrl)).json(); }catch(e){} }
+        if(!stores && sd.storesUrl){ try{ if(String(sd.storesUrl).indexOf('rtdb:')===0){ const du=await this._rtdbFetchDataUrl(String(sd.storesUrl).slice(5)); stores=JSON.parse(decodeURIComponent(escape(atob(du.slice(du.indexOf(',')+1))))); } else { stores=await (await fetch(sd.storesUrl)).json(); } }catch(e){} }
         if(stores) nfApplyStores(stores);
       }catch(e){ console.error('[nfCloud] stores recv',e); }
     }, err=>{});
@@ -5652,33 +5656,50 @@ const nfCloud={
       tx.set(dref, merged);
     });
   },
+  /* ===== Realtime Database 업로드/다운로드 헬퍼 (Cloud Storage 대체 — Blaze 요금제 불필요) ===== */
+  async _rtdbUploadDataUrl(dataUrl, name, idHint){
+    if(!this.rtdb) throw new Error('no-rtdb');
+    const comma=dataUrl.indexOf(','); const mime=dataUrl.slice(5,comma); const b64=dataUrl.slice(comma+1);
+    const fileId=((idHint||'misc')+'').replace(/[^\w-]/g,'')+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    const CHUNK=1024*1024; const parts=[]; for(let i=0;i<b64.length;i+=CHUNK) parts.push(b64.slice(i,i+CHUNK));
+    const ref=this.rtdb.ref('attach/'+fileId);
+    await ref.child('meta').set({ name:name||'file', mime:mime, size:b64.length, n:parts.length, ts:Date.now() });
+    for(let i=0;i<parts.length;i+=5){ await Promise.all(parts.slice(i,i+5).map((p,j)=>ref.child('c/'+(i+j)).set(p))); }
+    return 'rtdb:'+fileId;
+  },
+  async _rtdbFetchDataUrl(fileId){
+    if(!this.rtdb) throw new Error('no-rtdb');
+    const ref=this.rtdb.ref('attach/'+fileId);
+    const meta=(await ref.child('meta').once('value')).val()||{};
+    const cv=(await ref.child('c').once('value')).val()||{};
+    let b64=''; const n=meta.n||0; for(let i=0;i<n;i++) b64+=(cv[i]||'');
+    return 'data:'+(meta.mime||'application/octet-stream')+';base64,'+b64;
+  },
   async _pushStores(){
     const dref=this.storesRef();                 /* 별도 문서(pour_dashboard/stores) */
     const stores=nfCollectStores();
     const bundle=JSON.stringify(stores);
     if(bundle.length>800000){
-      /* 문서 1MB 제한 회피: 큰 번들은 스토리지로 오프로드. 스토리지가 막혀 있으면 이번 스토어 저장은 생략(카드는 이미 저장됨) */
-      if(this.storage){
+      /* 문서 1MB 제한 회피: 큰 번들은 Realtime Database로 오프로드(무료). 실패 시 이번 스토어 저장만 생략(카드는 이미 저장됨) */
+      if(this.rtdb){
         try{
-          const sref=this.storage.ref().child('shared/stores.json');
-          await sref.putString(bundle,'raw',{contentType:'application/json'});
-          const url=await sref.getDownloadURL();
-          await dref.set({ storesUrl:url, stores:firebase.firestore.FieldValue.delete() }, { merge:true });
-        }catch(e){ /* 스토리지 불가 → 생략 */ }
+          const du='data:application/json;base64,'+btoa(unescape(encodeURIComponent(bundle)));
+          const key=await this._rtdbUploadDataUrl(du,'stores.json','stores');
+          await dref.set({ storesUrl:key, stores:firebase.firestore.FieldValue.delete() }, { merge:true });
+        }catch(e){ /* 실패 → 생략 */ }
       }
       return;
     }
     await dref.set({ stores:stores, storesUrl:firebase.firestore.FieldValue.delete() }, { merge:true });
   },
-  async _offload(rv){   // 첨부 data:URL → Storage 업로드(문서 1MB 제한 회피). 없으면 로컬 전용 처리
+  async _offload(rv){   // 첨부 data:URL → Realtime Database 업로드(문서 1MB 제한 회피). 실패해도 URL을 지우지 않음(데이터 보존)
     const out=JSON.parse(JSON.stringify(rv));
     for(const r of out){ for(const c of (r.comments||[])){ for(const l of (c.links||[])){
       if(l && typeof l.url==='string' && l.url.indexOf('data:')===0){
-        if(this.storage){
-          try{ const ref=this.storage.ref().child('attach/'+(r.id||'r')+'/'+(c.id||'c')+'_'+encodeURIComponent(l.name||'file'));
-               await ref.putString(l.url,'data_url'); l.url=await ref.getDownloadURL(); }
-          catch(e){ console.error('[nfCloud] upload',e); l.url=''; l.localOnly=true; }
-        } else { l.url=''; l.localOnly=true; }
+        if(this.rtdb){
+          try{ l.url=await this._rtdbUploadDataUrl(l.url, l.name||'file', (r.id||'r')+'_'+(c.id||'c')); }
+          catch(e){ console.error('[nfCloud] rtdb offload',e); l.localOnly=true; /* URL 보존: 최소한 올린 PC에서는 보임 */ }
+        } else { l.localOnly=true; }
       }
     }}}
     return out;
@@ -6230,8 +6251,11 @@ function renderDetail(){
         : (lines.length ? `<ul>${lines.map(l=>`<li>${esc(l)}</li>`).join('')}</ul>` : `<div class="sb-empty">특이사항이 없습니다 — 오른쪽 ‘수정’으로 추가하세요.</div>`);
       return `<div class="spec-box detail"><div class="sb-h">특이사항${detailNotesEdit?'':`<button class="sb-edit" id="dNotesEdit">✏ 수정</button>`}</div>${body}</div>`;
     })()}
-    <div class="stage-row">${stages}</div>
-    <div class="stage-hint">현재 단계: <b>${cur.label}</b></div>
+    <div class="stage-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span style="font-size:12px;color:#8793a3;">현재 단계</span>
+      <span style="display:inline-block;padding:4px 13px;border-radius:14px;background:#394867;color:#fff;font-size:12.5px;font-weight:700;">${esc(cur.label)}</span>
+      <span style="font-size:11px;color:#9aa4b3;">단계 변경은 대시보드에서 카드를 끌거나 '→' 버튼으로</span>
+    </div>
     ${buildChecklist(r)}
     <div class="thread">${thread}</div>
     <div class="composer">
@@ -6343,7 +6367,7 @@ async function nfRtdbFetch(fileId){
 }
 async function attachCommentFile(file){
   if(!file) return;
-  if(file.size>MAX_ATTACH){ toast(file.name+' ('+(file.size/1048576).toFixed(1)+'MB): 30MB를 넘습니다'); return; }
+  if(file.size>MAX_ATTACH){ toast(file.name+' ('+(file.size/1048576).toFixed(1)+'MB): 최대 '+Math.round(MAX_ATTACH/1048576)+'MB까지 첨부할 수 있어요'); return; }
   /* Realtime Database 사용 가능 → 업로드(큰 파일·팀 공유 OK, 카드엔 참조만 저장) */
   if(nfCloud.on && nfCloud.rtdb){
     toast('⬆ '+file.name+' 올리는 중…');
