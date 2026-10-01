@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>넷폼 | POUR 컨설팅내역서 자동화 v6.9 · 자료접수 안내</title>
+<title>넷폼 | POUR 컨설팅내역서 자동화 v7.0 · 자료접수 안내</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -5410,33 +5410,10 @@ let currentDetailId=null, detailLinks=[];
 const $=s=>document.querySelector(s);
 const board=$('#board'), overlay=$('#overlay'), detailOverlay=$('#detailOverlay');
 
-const SEED=[
-  {id:'s1',site:'의정부 미락엘레트19단지아파트',req:'이음건설 조민기 이사님',gong:'POUR 슬라브',due:'2025-11-20',amt:'슬라브 ㎡당 30,000원',rev:'신수진',status:'final',
-   notes:'- 전체동(11개동) 슬라브 옥상방수\n- 옥탑 좁음 → 작업성 고려\n- 현장사진 부족, 추후 단가 변동 가능',
-   checks:{draft:{team:true,lead:true,senior:true},final:{team:true}},
-   comments:[
-     {id:'c1',author:'신수진',ts:'2025-11-20T14:07',text:'초안 산출 완료. 전체동(11개동) 슬라브 옥상방수_옥탑 포함. #금액 슬라브 ㎡당 30,000원\n(초안본 엑셀은 드라이브 링크로 첨부)',links:[]},
-     {id:'c2',author:'신수진',ts:'2026-02-09T17:28',text:'현설자료 토대로 변경된 내역서.\n- 변경 내용 없음(조민기 이사님 확인)\n- 현장사진 추가_옥탑 내부 사다리 진입\n(최종본 엑셀·현설자료·물량집계표 첨부)',links:[]},
-     {id:'c3',author:'주현진(팀장)',ts:'2026-02-10T09:17',text:'옥탑 좁음 작업성 고려, 보호판 이중작업으로 단가 검토.',links:[]},
-   ]},
-  {id:'s2',site:'대전 e편한세상 대전법동아파트',req:'㈜이음건설 이한진 팀장님',gong:'POUR 박공지붕 및 배수로',due:'2026-06-02',amt:'슬라브 ㎡당 35,000원',rev:'',status:'draft',
-   notes:'- 109동 1,2호라인(옥탑 포함)\n- 곡각지점 다수',checks:{draft:{team:true},final:{}},
-   comments:[{id:'c4',author:'신수진',ts:'2026-05-29T13:01',text:'초안 산출. 바탕정리 100만원(몰탈), 두겁 2회 도포 150만원.',links:[]}]},
-  {id:'s3',site:'고양 능곡대림아파트',req:'(현설 자료 기반)',gong:'POUR 옥상방수',due:'2026-06-02',amt:'',rev:'신수진 → 주현진',status:'done',
-   notes:'',checks:{draft:{team:true,lead:true,senior:true},final:{team:true,lead:true,senior:true}},
-   comments:[{id:'c5',author:'신수진',ts:'2026-06-02T11:53',text:'v-cutting 제외 / 외벽 균열보수 제외 문구 추가. 저장 및 발송완료.',links:[]}]},
-  {id:'s4',site:'하남 진모루마을현대아파트',req:'㈜석민이앤씨 전용성 이사',gong:'옥상방수',due:'2026-06-09',amt:'',rev:'',status:'draftSent',notes:'',checks:{draft:{team:true,lead:true,senior:true},final:{}},comments:[]},
-];
-
-/* 새 예시 현장 2건 (요청 주신 잔디 양식 기반) */
-const EXTRA=[
-  {id:'x_ldgp',site:'의정부 롯데캐슬 골드파크 1단지',req:'엘케이개발㈜ 신동민 과장님',gong:'POUR 슬라브',due:'',amt:'슬라브 ㎡당 35,000원',rev:'',status:'draft',
-   notes:'⚡ 마감: 긴급건 · 바탕정리 50%(몰탈포함) · 곡각지점 다수',checks:{draft:{},final:{}},
-   comments:[{id:'cx1',author:'신수진',ts:'2026-06-09T09:00',text:'초안 검토 요청 — 의정부 롯데캐슬 골드파크 1단지 [마감: 긴급건]\n#공사범위: 전체동(8개동) 슬라브 옥상 방수공사_옥탑포함_난간 두겁 및 기둥 하단 2회 도포 포함_구조물 제외\n#주소: 경기 의정부시 범골로63번길 13\n#실행/입찰 구분: 실행\n#금액: 슬라브 ㎡당 35,000원\n[특이사항]\n- 바탕정리 50%(몰탈포함)\n- 기타구조물로 인한 작업성 고려\n- 곡각지점 다수\n- 페이퍼팬벤트 세대당 1EA 설정 타공\n- 물량: 엘케이개발 제공 물량으로 설정\n(초안본 엑셀은 드라이브 링크로 첨부)',links:[]}]},
-  {id:'x_sbd',site:'용인 신봉동부센트레빌5단지아파트',req:'㈜적산건설 이영우 이사님',gong:'POUR 슬라브',due:'',amt:'슬라브 ㎡당 35,000원 / 2회도포 ㎡당 11,000원',rev:'',status:'draft',
-   notes:'⚡ 마감: 빠르게 · 다층층 구조 · 곡각지점 다수 · -25% 인상 내역서',checks:{draft:{},final:{}},
-   comments:[{id:'cx2',author:'신수진',ts:'2026-06-09T09:05',text:'초안 검토 요청 — 용인 신봉동부센트레빌5단지아파트 [마감: 빠르게]\n#공사내역: 전체동(8개동) 슬라브 옥상 방수공사_방수턱까지 시트마감_옥탑포함_난간두겁 2회도포_전용부 벽체 2회도포 포함\n#주소: 경기 용인시 수지구 신봉1로 214\n#실행/입찰 구분: 실행\n#금액: 슬라브 ㎡당 35,000원, 2회도포 ㎡당 11,000원\n[특이사항]\n- 기타구조물로 인한 작업성 고려\n- 곡각지점 다수\n- 다층층 구조\n- 바탕정리 40%(몰탈포함)\n- 배관트랩 교체 30ea(이영우 이사님 확인)\n- 난간 두겁까지 2회 도포\n- 전용부 상부 시트마감 및 벽체 두겁까지 2회도포\n- -25% 인상된 내역서\n(초안본 엑셀은 드라이브 링크로 첨부)',links:[]}]},
-];
+/* 예시(데모) 카드 제거 — 실제 운영 중이라 내장 예시는 넣지 않음.
+   (예시 카드가 삭제되며 생긴 삭제표식이 공유 보드를 비우던 문제의 근원이라 함께 제거) */
+const SEED=[];
+const EXTRA=[];
 
 /* ---------- load / save ---------- */
 async function load(){
@@ -5502,6 +5479,22 @@ const NF_FB_DEFAULT={
   appId:"1:700614857039:web:fb4b3dfa189a636fdc753a"
 };
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
+/* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
+   (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
+const APP_VER='2026-10-01-sync2';
+function nfAutoUpdate(v){
+  try{
+    if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
+    const k='nf_updated_to';
+    if(sessionStorage.getItem(k)===String(v)) return;    // 이번 세션에 이미 이 버전으로 새로고침함 → 루프 방지
+    sessionStorage.setItem(k, String(v));
+    try{ toast('새 버전을 불러옵니다…'); }catch(e){}
+    setTimeout(function(){
+      try{ location.replace(location.pathname + '?u=' + encodeURIComponent(String(v))); }
+      catch(e){ try{ location.reload(); }catch(_){} }
+    }, 900);
+  }catch(e){}
+}
 function nfParseCfg(text){
   if(!text) return null;
   try{ const s=String(text); const a=s.indexOf('{'), b=s.lastIndexOf('}'); if(a<0||b<0) return null;
@@ -5532,6 +5525,7 @@ const nfCloud={
       nfCloud._syncErrShown=false;   /* 정상 수신 시 오류 표시 리셋 */
       if(!snap.exists){ if(!this._seeded){ this._seeded=true; this.push(); } return; }
       const d=snap.data();
+      try{ if(d && d.appVer) nfAutoUpdate(d.appVer); }catch(e){}   /* 새 버전 배포 감지 → 옛 캐시 PC 자동 최신화 */
       if(d && Array.isArray(d.reviews)){
         this._seeded=true;
         const _prev=reviews;
@@ -5585,7 +5579,9 @@ const nfCloud={
         const remoteReviews=Array.isArray(cur.reviews)?cur.reviews:[];
         const delSet=new Set([].concat(Array.isArray(cur.deletedIds)?cur.deletedIds.map(String):[], delLocal));
         const mergedReviews=nfMergeReviews(remoteReviews, clean, delSet);
-        const payload=Object.assign({ reviews:mergedReviews, deletedIds:[...delSet], updatedAt:Date.now() }, storesField);
+        const remoteVer=(cur && cur.appVer)?String(cur.appVer):'';
+        const appVer=(remoteVer>APP_VER)?remoteVer:APP_VER;   /* 버전은 내리지 않음(항상 최신 유지) */
+        const payload=Object.assign({ reviews:mergedReviews, deletedIds:[...delSet], updatedAt:Date.now(), appVer:appVer }, storesField);
         tx.set(ref, payload);
       });
     }
