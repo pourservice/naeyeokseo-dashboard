@@ -5492,7 +5492,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-01-sync6';
+const APP_VER='2026-10-01-sync7';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -5525,7 +5525,9 @@ const nfCloud={
     try{
       if(!firebase.apps.length) firebase.initializeApp(cfg);
       this.db=firebase.firestore();
-      try{ this.storage=firebase.storage(); }catch(e){ this.storage=null; }
+      /* 파이어베이스 스토리지(사진/첨부 업로드)는 버킷 CORS 미설정으로 막혀 있어 빨간 오류만 유발 → 아예 사용 안 함.
+         카드·댓글·발행이력은 전부 파이어스토어로 동기화되므로 영향 없음(첨부·현장사진은 각 PC에 로컬 보관). */
+      this.storage=null;
       this.on=true; this._reconciled=false; this._synced=new Map(); this._removedIds=new Set(); this._firstCards=true; nfCloudStatus(); this.subscribe();
       try{ setTimeout(function(){ try{ satFetchShared(currentSatKey()); }catch(_){}; try{ satShareAll(); }catch(_){} }, 1500); }catch(_){}
       return true;
