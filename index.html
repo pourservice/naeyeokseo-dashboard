@@ -5456,10 +5456,16 @@ const NF_DEL_KEY='nf_deleted_ids';
 function nfDelIds(){ try{ const a=JSON.parse(localStorage.getItem(NF_DEL_KEY)||'[]'); return Array.isArray(a)?a.map(String):[]; }catch(e){ return []; } }
 function nfAddDelId(id){ if(id==null) return; try{ const s=new Set(nfDelIds()); s.add(String(id)); localStorage.setItem(NF_DEL_KEY, JSON.stringify([...s])); }catch(e){} }
 function nfMergeDelIds(remoteIds){ const s=new Set(nfDelIds()); (remoteIds||[]).forEach(x=>{ if(x!=null) s.add(String(x)); }); const arr=[...s]; try{ localStorage.setItem(NF_DEL_KEY, JSON.stringify(arr)); }catch(e){} return arr; }
-/* 댓글 union — 양쪽 기기에서 단 댓글을 모두 보존(id 기준), 시간순 정렬 */
+/* ===== 댓글 삭제 표식 — 삭제한 댓글이 '댓글 합치기' 때 서버에서 되살아나지 않게 ===== */
+const NF_DELC_KEY='nf_deleted_comment_ids';
+function nfDelCommentIds(){ try{ const a=JSON.parse(localStorage.getItem(NF_DELC_KEY)||'[]'); return Array.isArray(a)?a.map(String):[]; }catch(e){ return []; } }
+function nfAddDelCommentId(id){ if(id==null) return; try{ const s=new Set(nfDelCommentIds()); s.add(String(id)); let arr=[...s]; if(arr.length>800) arr=arr.slice(arr.length-800); localStorage.setItem(NF_DELC_KEY, JSON.stringify(arr)); }catch(e){} }
+/* 댓글 union — 양쪽 기기에서 단 댓글을 모두 보존(id 기준), 삭제표식은 제외, 시간순 정렬 */
 function nfMergeComments(a,b){
+  const del=new Set(nfDelCommentIds());
   const map=new Map(); const noId=[];
-  (a||[]).concat(b||[]).forEach(c=>{ if(!c) return; const id=c.id; if(id==null){ noId.push(c); return; } if(!map.has(String(id))) map.set(String(id), c); });
+  (a||[]).concat(b||[]).forEach(c=>{ if(!c) return; const id=c.id; if(id!=null && del.has(String(id))) return;   /* 삭제한 댓글은 되살리지 않음 */
+    if(id==null){ noId.push(c); return; } if(!map.has(String(id))) map.set(String(id), c); });
   const res=[...map.values()].concat(noId);
   res.sort((x,y)=>{ const tx=(x&&x.ts)||''; const ty=(y&&y.ts)||''; return tx<ty?-1:(tx>ty?1:0); });
   return res;
@@ -5494,7 +5500,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-01-sync11';
+const APP_VER='2026-10-01-sync12';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -5568,6 +5574,8 @@ const nfCloud={
         /* 이후: 아직 서버로 안 올라간 로컬 신규 카드는 유지(삭제된 것만 제외) → 막 만든 카드가 응답 지연에 사라지지 않음 */
         (_prev||[]).forEach(r=>{ if(r && r.id!=null){ const id=String(r.id); if(!remoteMap.has(id) && !this._removedIds.has(id)) next.push(r); } });
       }
+      /* 삭제한 댓글은 서버에 아직 남아 있어도 화면에 안 보이게(전파 지연 중에도) */
+      try{ const dc=new Set(nfDelCommentIds()); if(dc.size) next.forEach(r=>{ if(r&&Array.isArray(r.comments)) r.comments=r.comments.filter(c=>!(c&&c.id!=null&&dc.has(String(c.id)))); }); }catch(e){}
       reviews=next; nfPreserveLocalFiles(_prev, reviews); normalizeReviews();
       try{ store.set(KEY, JSON.stringify(reviews)); }catch(e){}
       try{ render(); if(typeof currentDetailId!=='undefined' && currentDetailId) renderDetail(); }catch(e){}
@@ -6277,7 +6285,7 @@ async function postComment(){
     }
   }catch(_){}
 }
-async function delComment(r,id){if(!confirm('이 댓글을 삭제할까요?'))return;r.comments=r.comments.filter(x=>x.id!==id);await save();renderDetail();render();}
+async function delComment(r,id){if(!confirm('이 댓글을 삭제할까요?'))return;nfAddDelCommentId(id);r.comments=r.comments.filter(x=>x.id!==id);await save();renderDetail();render();}
 
 /* ---------- 엑셀 다운로드 (현황 전체) ---------- */
 function exportExcel(){
