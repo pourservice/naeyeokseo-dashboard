@@ -929,7 +929,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
           <button class="seg-btn" data-set="war" onclick="applyPriceSet('war')">협력사 단가</button>
         </div>
         <div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:10px;" id="multNow">현재 적용: 내부단가</div>
-        <div style="font-size:11.5px;color:#9BA4B5;margin-top:6px;">· 내부단가: 싱글 26,000 / 금속기와 35,000 / 슬라브 28,000 / 배수로 30,000 / PVC 32,000<br>· 협력사 단가(양식DB 일위대가): 싱글 54,371 / 금속기와 66,210 / 슬라브·배수로 64,409 / PVC 69,256<br>· <b>% 조정</b>: 현재 기준에서 그만큼 올리거나(양수) 내려요(음수). 예: <b>-5</b> → 5% 인하 · 아래 표에서 공종별로 직접 수정도 가능.</div>
+        <div style="font-size:11.5px;color:#9BA4B5;margin-top:6px;">· 내부단가: 싱글 26,000 / 금속기와 35,000 / 슬라브 28,000 / 배수로 30,000 / PVC 32,000<br>· 협력사 단가: 싱글 27,500 / 금속기와 37,000 / 슬라브 30,500 / 배수로 32,500 / PVC 37,600<br>· <b>% 조정</b>: 현재 기준에서 그만큼 올리거나(양수) 내려요(음수). 예: <b>-5</b> → 5% 인하 · 아래 표에서 공종별로 직접 수정도 가능.</div>
         <div class="intl-note">※ <b>내부단가</b>는 <b>넷폼 직원들 단가</b>입니다.</div>
       </div>
       <div class="field" style="margin-bottom:10px;max-width:660px;">
@@ -1616,10 +1616,7 @@ function wallLedger(){
 /* 일위대가 역산 코어 — target(㎡당 실행가)·lab(인부단가)을 명시적으로 받아 계산.
    → 같은 공법을 내부/협력사 두 벌로 각각 계산할 수 있음 */
 function buildLedgerCore(recipe, target, lab, kindHint){
-  const _war = kindHint ? (kindHint==='war') : ((typeof currentPriceKind==='function') && currentPriceKind()==='war');
-  const _scTbl = (_war && typeof SPEC_COEFF_WAR!=='undefined') ? SPEC_COEFF_WAR : SPEC_COEFF;   /* 협력사는 양식DB 기공 계수 사용 */
-  const _sc=(typeof _scTbl!=='undefined' && _scTbl[recipe.key]!=null) ? _scTbl[recipe.key]
-          : ((typeof SPEC_COEFF!=='undefined' && SPEC_COEFF[recipe.key]!=null) ? SPEC_COEFF[recipe.key] : (num(($('#splitSpecial')||{}).value)||0.040));
+  const _sc=(typeof SPEC_COEFF!=='undefined' && SPEC_COEFF[recipe.key]!=null) ? SPEC_COEFF[recipe.key] : (num(($('#splitSpecial')||{}).value)||0.040);   /* 목표단가에서 노무 역산(기공 계수) */
   const specCoeff = Math.max(_sc,0);   // 기공(특별인부) 계수(인/㎡) — 공법별 지정(SPEC_COEFF) 우선
   /* ★ 재료비 금액은 항목별 '올림(ROUNDUP)' */
   const mats = recipe.materials.map(m=>{ const applied=m.price*materialMult; return {...m,applied,amount:Math.ceil(+(m.coeff*applied).toFixed(2))}; });   /* 부동소수점 오차 제거 후 ROUNDUP(예: 0.28×8925=2499) */
@@ -2601,12 +2598,12 @@ function loadDB(){
 /* ★ 단가 기준표
    base   = 내부단가 · raised = 협력사 단가 (둘 다 확정값, 직접 지정) */
 const PC_TYPES={
-  shingl:{label:'싱글',   base:26000, raised:54371},                                  /* 내부 26,000 · 협력 54,371(양식DB 일위대가) */
-  metal: {label:'금속기와', base:35000, raised:66210},                                  /* 내부 35,000 · 협력 66,210(양식DB) */
-  slab:  {label:'슬라브',  base:28000, raised:64409, drainBase:30000, drainRaised:64409},/* 내부 슬라브 28,000·배수로 30,000 · 협력 64,409(양식DB, 배수로 동일) */
-  pvc:   {label:'PVC',    base:32000, raised:69256}                                    /* 협력 69,256(양식DB) */
+  shingl:{label:'싱글',   base:26000, raised:27500},                                  /* 내부 26,000 · 협력 27,500 */
+  metal: {label:'금속기와', base:35000, raised:37000},                                  /* 내부 35,000 · 협력 37,000 */
+  slab:  {label:'슬라브',  base:28000, raised:30500, drainBase:30000, drainRaised:32500},/* 내부 슬라브 28,000·배수로 30,000 · 협력 슬라브 30,500·배수로 32,500 */
+  pvc:   {label:'PVC',    base:32000, raised:37600}                                    /* 협력 37,600 */
 };
-const PVC_BASE = 32000, PVC_RAISED = 69256;   /* PVC 내부 32,000 · 협력 69,256(양식DB 일위대가) */
+const PVC_BASE = 32000, PVC_RAISED = 37600;   /* PVC 내부 32,000 · 협력 37,600 */
 let WAR25_ADJ = 0;   /* (호환용 · 더 이상 단가 계산에 사용 안 함) */
 /* 단가기준: '0'(내부단가) | '25'(협력사 단가) → 공종별 확정 단가 반환 */
 function pcTierBase(t,tier,drain){
@@ -4705,7 +4702,10 @@ function newEstimate(){
   showView('estimate'); window.scrollTo(0,0);
 }
 window.newEstimate=newEstimate;
-function loadHistory(){ try{ return JSON.parse(localStorage.getItem(HKEY)||'[]'); }catch(e){ return []; } }
+/* 발행이력 삭제 표식(tombstone) — 삭제한 발행본이 팀 동기화(합집합)로 되살아나지 않게 */
+function nfLocalDeletedHist(){ try{ const a=JSON.parse(localStorage.getItem('nf_deleted_hist_ids')||'[]'); return Array.isArray(a)?a.map(x=>(x&&x.id!=null)?String(x.id):String(x)).filter(Boolean):[]; }catch(e){ return []; } }
+function nfAddDeletedHist(id){ if(id==null)return; try{ let a=JSON.parse(localStorage.getItem('nf_deleted_hist_ids')||'[]'); if(!Array.isArray(a))a=[]; const sid=String(id); if(!a.some(x=>((x&&x.id!=null)?String(x.id):String(x))===sid)){ a.push({id:sid}); if(a.length>1000)a=a.slice(-1000); localStorage.setItem('nf_deleted_hist_ids', JSON.stringify(a)); } }catch(e){} }
+function loadHistory(){ try{ let h=JSON.parse(localStorage.getItem(HKEY)||'[]'); if(!Array.isArray(h))h=[]; const dead=new Set(nfLocalDeletedHist()); return dead.size?h.filter(s=>!(s&&s.id!=null&&dead.has(String(s.id)))):h; }catch(e){ return []; } }
 function saveHistory(h){ try{ localStorage.setItem(HKEY, JSON.stringify(h)); }catch(e){ alert('이력 저장 실패(브라우저 저장공간 초과 가능). 중요한 건은 .json으로 내보내 보관하세요.'); } }
 function findSnap(id){ return loadHistory().find(s=>s.id===id); }
 function fmtDate(iso){ if(!iso)return''; const d=new Date(iso),p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'.'+p(d.getMonth()+1)+'.'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes()); }
@@ -4733,7 +4733,7 @@ function renderHistory(){
 }
 function editFromHistory(id){ const s=findSnap(id); if(!s)return; restoreSnapshot(s); loadedReportId=id; renderBanner(); showView('estimate'); window.scrollTo(0,0); }
 function viewFromHistory(id){ const s=findSnap(id); if(!s)return; restoreSnapshot(s); loadedReportId=id; renderBanner(); showView('estimate'); try{ const t=document.querySelector('.tab[data-tab="detail"]'); if(t)t.click(); }catch(e){} const node=$('#detailBody')||$('#quoteBody'); if(node)setTimeout(()=>node.scrollIntoView({behavior:'smooth',block:'start'}),60); }
-function deleteHistory(id){ if(!confirm('이 발행본을 이력에서 삭제할까요? 되돌릴 수 없습니다.'))return; saveHistory(loadHistory().filter(s=>s.id!==id)); if(loadedReportId===id){loadedReportId=null;renderBanner();} renderHistory(); }
+function deleteHistory(id){ if(!confirm('이 발행본을 이력에서 삭제할까요? 되돌릴 수 없습니다.'))return; nfAddDeletedHist(id); saveHistory(loadHistory().filter(s=>s.id!==id)); if(loadedReportId===id){loadedReportId=null;renderBanner();} renderHistory(); }
 function updHistMemo(id,v){ const h=loadHistory(),s=h.find(x=>x.id===id); if(s){ s.meta.memo=v; saveHistory(h); } }
 function renderBanner(){ const b=$('#loadedBanner'); if(!b)return; const s=loadedReportId?findSnap(loadedReportId):null; if(!s){ b.style.display='none'; return; } b.style.display='flex'; $('#loadedBannerText').textContent=`${s.meta.client||s.meta.site||''} ${s.meta.issueNo||''}회차 (${fmtDate(s.meta.issuedAt)}) 불러옴 — 수정 후 [발행]하면 새 회차로 저장됩니다.`; }
 function clearLoaded(){ loadedReportId=null; renderBanner(); }
@@ -5544,7 +5544,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync19';
+const APP_VER='2026-10-02-sync21';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -5750,11 +5750,12 @@ try{ window.nfCloud=nfCloud; }catch(_){}   /* ★ IIFE 밖(위성사진 공유 �
    - 배열(arr): id 기준 합집합 병합 → 어느 PC의 기록도 사라지지 않음(무손실)
    - 설정(cfg): 마지막 저장이 이김(타임스탬프 LWW) → 단가/안내문구는 최신 편집본으로 통일 */
 const NF_SHARED=[
-  {k:'nf_history',      t:'arr'},
-  {k:'nf_pricelog2',    t:'arr'},
-  {k:'nf_db',           t:'cfg'},
-  {k:'nf_price_reason', t:'cfg'},
-  {k:'nf_notices',      t:'cfg'}
+  {k:'nf_history',          t:'arr'},
+  {k:'nf_deleted_hist_ids', t:'arr'},   /* 발행이력 삭제 표식 — 합집합으로 팀 전체에 전파(삭제가 되살아나지 않게) */
+  {k:'nf_pricelog2',        t:'arr'},
+  {k:'nf_db',               t:'cfg'},
+  {k:'nf_price_reason',     t:'cfg'},
+  {k:'nf_notices',          t:'cfg'}
 ];
 const NF_TS_KEY='nf_sync_ts';
 function nfTsMap(){ try{ return JSON.parse(localStorage.getItem(NF_TS_KEY)||'{}')||{}; }catch(e){ return {}; } }
@@ -5795,8 +5796,16 @@ function nfComputeMerge(localGet, localTsGet, remote){
     if(def.t==='arr'){
       let local; try{ local=JSON.parse(localGet(def.k)||'[]'); }catch(e){ local=[]; }
       if(!Array.isArray(local)) local=[];
-      const merged=nfMergeById(local, Array.isArray(r.data)?r.data:[]);
-      if(def.k==='nf_history') nfSortHistory(merged);
+      let merged=nfMergeById(local, Array.isArray(r.data)?r.data:[]);
+      if(def.k==='nf_history'){
+        /* 삭제 표식(로컬 ∪ 원격) 적용 — 삭제한 발행본이 합집합 병합으로 되살아나지 않게 */
+        const dead=new Set();
+        const addDead=arr=>{ try{ (arr||[]).forEach(x=>{ const i=(x&&x.id!=null)?x.id:x; if(i!=null) dead.add(String(i)); }); }catch(e){} };
+        try{ addDead(JSON.parse(localGet('nf_deleted_hist_ids')||'[]')); }catch(e){}
+        const rd=remote&&remote['nf_deleted_hist_ids']; if(rd&&Array.isArray(rd.data)) addDead(rd.data);
+        if(dead.size) merged=merged.filter(s=>!(s&&s.id!=null&&dead.has(String(s.id))));
+        nfSortHistory(merged);
+      }
       if(merged.length!==local.length || JSON.stringify(merged)!==JSON.stringify(local)){
         changes.push({k:def.k,t:'arr',value:JSON.stringify(merged)});
       }
