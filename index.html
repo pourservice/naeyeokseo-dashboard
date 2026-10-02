@@ -1206,7 +1206,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <button class="btn btn-ghost" id="modeBtn" onclick="toggleBoardMode()" title="칸반 / 목록 보기 전환">☰ 목록</button>
     <span id="shareStatus" class="share-badge">○ 팀 공유 꺼짐</span>
     <button class="btn btn-ghost" id="shareBtn" onclick="openShare()" title="팀원과 실시간으로 검토방을 공유합니다">🔗 팀 공유</button>
-    <button class="btn btn-ghost" id="gdMigBtn" onclick="nfGdMigrateAll()" title="기존에 올린 첨부(엑셀·PDF 등)를 구글 드라이브로 한 번에 옮깁니다" style="display:none">📦 드라이브로 이관</button>
+    <button class="btn btn-ghost" id="gdMigBtn" onclick="nfGdMigrateAll()" title="기존 첨부를 구글 드라이브로 옮기고, 모든 드라이브 파일을 '링크 있는 사람 누구나 보기'로 공개 → 팀원 누구나 로그인 없이 다운로드" style="display:none">📦 드라이브 이관·공개</button>
     <button class="btn btn-ghost" id="xlsBtn">⬇ 현황표</button>
     <button class="btn btn-primary" id="addBtn">＋ 새 현장</button>
   </div>
@@ -5646,7 +5646,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync28';
+const APP_VER='2026-10-02-sync29';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6230,9 +6230,9 @@ function nfPreserveLocalFiles(oldR, newR){
 function nfDownloadFile(f){
   if(!f || !f.url){ toast('이 파일은 아직 이 컴퓨터에 없어요. (원본을 올린 컴퓨터에서 받아주세요)'); return; }
   const url0=String(f.url);
-  if(url0.indexOf('gdrive:')===0){   /* Google Drive 파일 → 받아서 저장 */
-    toast('⬇ 다운로드 준비 중…');
-    nfGdFetchBytes(url0.slice(7)).then(buf=>{ const blob=new Blob([buf],{type:nfMimeFromName(f.name)}); const bu=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=bu; a.download=f.name||'파일'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(bu),4000); }).catch(e=>{ console.error('[dl gdrive]',e); toast('다운로드 실패 — 드라이브 연결 확인'); });
+  if(url0.indexOf('gdrive:')===0){   /* Google Drive 공개 파일 → 로그인 없이 공개 링크로 바로 다운로드 */
+    const id=url0.slice(7);
+    const a=document.createElement('a'); a.href=nfGdDownloadUrl(id); a.target='_blank'; a.rel='noopener'; document.body.appendChild(a); a.click(); a.remove();
     return;
   }
   if(url0.indexOf('rtdb:')===0){   /* Realtime Database 파일 → 받아서 저장 */
@@ -6298,11 +6298,13 @@ async function nfPreviewFile(f){
   m.querySelector('.fp-title').textContent=f.name||'첨부파일';
   m.querySelector('.fp-dl').onclick=()=>nfDownloadFile(f);
   m.querySelector('.fp-open').onclick=()=>{ const u=String(f.url);
-    if(u.indexOf('gdrive:')===0){ nfGdFetchBytes(u.slice(7)).then(buf=>{ try{ const bu=URL.createObjectURL(new Blob([buf],{type:nfMimeFromName(f.name)})); window.open(bu,'_blank','noopener'); }catch(e){} }).catch(()=>toast('열기 실패')); }
+    if(u.indexOf('gdrive:')===0){ try{ window.open(nfGdViewUrl(u.slice(7)),'_blank','noopener'); }catch(e){} }
     else if(u.indexOf('rtdb:')===0){ nfRtdbFetch(u.slice(5)).then(r=>{ try{ window.open(r.dataUrl,'_blank','noopener'); }catch(e){} }).catch(()=>toast('열기 실패')); }
     else { try{ window.open(f.url,'_blank','noopener'); }catch(e){} } };
   body.innerHTML='<div class="fp-load">미리보기 불러오는 중…</div>'; m.classList.add('show');
   const ext=nfFileExt(f.name,f.url);
+  /* Google Drive 공개 파일 → 구글 뷰어 iframe (엑셀·PDF·이미지 모두 로그인 없이 미리보기) */
+  if(String(f.url).indexOf('gdrive:')===0){ body.innerHTML='<iframe class="fp-frame" src="'+esc(nfGdPreviewUrl(String(f.url).slice(7)))+'"></iframe>'; return; }
   try{
     if(['xlsx','xls','xlsm','csv'].indexOf(ext)>=0){
       if(typeof XLSX==='undefined'){ body.innerHTML='<div class="fp-msg">엑셀 미리보기 모듈 로딩 중입니다 — 잠시 후 다시 누르거나 <b>다운로드</b>로 받아주세요.</div>'; return; }
@@ -6580,8 +6582,19 @@ async function nfGdUpload(file, reviewId){
   const put=await fetch(session, {method:'PUT', headers:{'Content-Type':file.type||nfMimeFromName(file.name)}, body:file});
   if(!put.ok) throw new Error('드라이브 업로드 실패 '+put.status);
   const j=await put.json();
+  try{ await nfGdSetPublic(j.id, token); }catch(_){}   /* ★ 올리자마자 '링크 있는 사람 누구나 보기'로 공개 → 팀원 누구나 로그인 없이 다운로드 */
   return 'gdrive:'+j.id;
 }
+/* 파일을 '링크가 있는 사람은 누구나(보기)'로 공개 — 한 번만 해두면 그 뒤로는 토큰 없이 공개 URL로 열림 */
+async function nfGdSetPublic(id, token){
+  token=token||await nfGdGetToken(false);
+  const r=await nfGdApi('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'/permissions?fields=id', {method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body:JSON.stringify({role:'reader', type:'anyone'})});
+  return r.ok;   /* 이미 공개면 실패해도 무방 */
+}
+/* 공개 파일용 URL — 로그인 불필요 */
+function nfGdDownloadUrl(id){ return 'https://drive.usercontent.google.com/download?id='+id+'&export=download&confirm=t'; }
+function nfGdViewUrl(id){ return 'https://drive.google.com/file/d/'+id+'/view'; }
+function nfGdPreviewUrl(id){ return 'https://drive.google.com/file/d/'+id+'/preview'; }
 async function nfGdFetchBytes(id){
   const token=await nfGdGetToken(false);
   const r=await nfGdApi('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?alt=media', {headers:{Authorization:'Bearer '+token}});
@@ -6608,8 +6621,11 @@ async function nfGdMigrateAll(){
   (reviews||[]).forEach(r=>{ (r.comments||[]).forEach(c=>{ (c.links||[]).forEach(l=>{
     if(l && typeof l.url==='string' && (l.url.indexOf('rtdb:')===0 || l.url.indexOf('data:')===0)) jobs.push({r,c,l});
   }); }); });
-  if(!jobs.length){ toast('이관할 파일이 없어요 — 이미 모두 드라이브에 있습니다 ✓'); return; }
-  if(!confirm('기존 첨부 '+jobs.length+'개를 구글 드라이브로 옮깁니다.\n끝날 때까지 이 창을 닫지 마세요.\n시작할까요?')) return;
+  /* 이미 드라이브에 있는 파일(공개 전환 대상) 수집 */
+  const gids=new Set();
+  (reviews||[]).forEach(r=>{ (r.comments||[]).forEach(c=>{ (c.links||[]).forEach(l=>{ if(l && typeof l.url==='string' && l.url.indexOf('gdrive:')===0) gids.add(l.url.slice(7)); }); }); });
+  if(!jobs.length && !gids.size){ toast('이관/공개할 파일이 없어요 ✓'); return; }
+  if(!confirm('기존 첨부를 구글 드라이브로 옮기고( '+jobs.length+'개 ), 모든 드라이브 파일을 "링크 있는 사람 누구나 보기"로 공개합니다.\n→ 팀원 누구나 로그인 없이 다운로드/열람 가능해집니다.\n끝날 때까지 이 창을 닫지 마세요. 시작할까요?')) return;
   let ok=0, fail=0; const rtdbToDel=[];
   for(let i=0;i<jobs.length;i++){
     const j=jobs[i], l=j.l, url=l.url;
@@ -6628,8 +6644,12 @@ async function nfGdMigrateAll(){
     }catch(e){ console.error('[gd migrate]', e, l&&l.name); fail++; }
   }
   if(rtdbToDel.length && nfCloud.on && nfCloud.rtdb){ for(const fid of rtdbToDel){ try{ await nfCloud.rtdb.ref('attach/'+fid).remove(); }catch(_){} } }   /* 확인된 원본만 삭제 → 1GB 회수 */
+  /* ★ 모든 드라이브 파일을 공개 전환 — 이후로는 팀원이 로그인 없이 받음 (방금 올린 것 포함) */
+  (reviews||[]).forEach(r=>{ (r.comments||[]).forEach(c=>{ (c.links||[]).forEach(l=>{ if(l && typeof l.url==='string' && l.url.indexOf('gdrive:')===0) gids.add(l.url.slice(7)); }); }); });
+  let pub=0, pubFail=0, pi=0; const gidArr=Array.from(gids);
+  for(const id of gidArr){ pi++; toast('🔓 공개 전환 중… '+pi+'/'+gidArr.length); try{ await nfGdSetPublic(id); pub++; }catch(e){ pubFail++; } }
   try{ render(); }catch(_){} try{ if(currentDetailId) renderDetail(); }catch(_){}
-  toast('이관 완료 — 성공 '+ok+'개'+(fail?(' · 실패 '+fail+'개(원본 그대로 유지)'):'')+' ✓');
+  toast('완료 — 이관 '+ok+'개'+(fail?('(실패 '+fail+')'):'')+' · 공개 '+pub+'개'+(pubFail?('(실패 '+pubFail+')'):'')+' ✓ 이제 팀원 누구나 로그인 없이 받을 수 있어요');
 }
 try{ window.nfGdMigrateAll=nfGdMigrateAll; }catch(_){}
 /* ★ 진입/새로고침만으로는 구글 로그인 안 함 — 세션에 유효 토큰이 있으면 '연결됨' 표시만, 없으면 파일 올리거나 열 때 1회만 연결 */
