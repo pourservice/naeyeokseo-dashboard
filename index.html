@@ -5646,7 +5646,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync27';
+const APP_VER='2026-10-02-sync28';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6548,10 +6548,12 @@ const NF_GD_SCOPE='https://www.googleapis.com/auth/drive.file';
 const NF_GD_FOLDER_NAME='POUR 내역서 첨부';
 let nfGdOn=false, _gdTok=null, _gdExp=0, _gdTC=null, _gdPending=null, nfGdFolderId=null;
 try{ nfGdFolderId=localStorage.getItem('nf_gd_folder')||null; }catch(_){}
+/* 토큰을 세션에 캐시 — 같은 탭에서 새로고침/재진입 시 구글 로그인 다시 안 뜨게(토큰 유효 1시간 동안 재사용) */
+try{ const _s=JSON.parse(sessionStorage.getItem('nf_gd_tok')||'null'); if(_s&&_s.t&&_s.e&&Date.now()<_s.e){ _gdTok=_s.t; _gdExp=_s.e; nfGdOn=true; } }catch(_){}
 function nfMimeFromName(name){ const e=String(name||'').toLowerCase().split('.').pop(); return ({pdf:'application/pdf',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',bmp:'image/bmp',svg:'image/svg+xml',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',xlsm:'application/vnd.ms-excel.sheet.macroEnabled.12',dwg:'application/acad'}[e])||'application/octet-stream'; }
 function nfGdLoadGis(){ return new Promise((res,rej)=>{ try{ if(window.google&&google.accounts&&google.accounts.oauth2) return res(); }catch(_){} const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client'; s.async=true; s.defer=true; s.onload=()=>setTimeout(res,0); s.onerror=()=>rej(new Error('구글 로그인 모듈 로드 실패')); document.head.appendChild(s); }); }
 function nfGdInitClient(){ if(_gdTC) return; _gdTC=google.accounts.oauth2.initTokenClient({ client_id:NF_GD_CLIENT_ID, scope:NF_GD_SCOPE,
-  callback:(resp)=>{ if(resp&&resp.access_token){ _gdTok=resp.access_token; _gdExp=Date.now()+(((+resp.expires_in)||3600)-90)*1000; nfGdOn=true; try{localStorage.setItem('nf_gd_enabled','1');}catch(_){}; if(_gdPending){_gdPending.res(_gdTok);_gdPending=null;} } else if(_gdPending){ _gdPending.rej(new Error('토큰 없음')); _gdPending=null; } },
+  callback:(resp)=>{ if(resp&&resp.access_token){ _gdTok=resp.access_token; _gdExp=Date.now()+(((+resp.expires_in)||3600)-90)*1000; nfGdOn=true; try{localStorage.setItem('nf_gd_enabled','1');}catch(_){}; try{sessionStorage.setItem('nf_gd_tok',JSON.stringify({t:_gdTok,e:_gdExp}));}catch(_){}; if(_gdPending){_gdPending.res(_gdTok);_gdPending=null;} } else if(_gdPending){ _gdPending.rej(new Error('토큰 없음')); _gdPending=null; } },
   error_callback:(err)=>{ if(_gdPending){ _gdPending.rej(err||new Error('token error')); _gdPending=null; } } }); }
 async function nfGdGetToken(interactive){
   if(_gdTok && Date.now()<_gdExp) return _gdTok;
@@ -6630,7 +6632,8 @@ async function nfGdMigrateAll(){
   toast('이관 완료 — 성공 '+ok+'개'+(fail?(' · 실패 '+fail+'개(원본 그대로 유지)'):'')+' ✓');
 }
 try{ window.nfGdMigrateAll=nfGdMigrateAll; }catch(_){}
-try{ if(localStorage.getItem('nf_gd_enabled')==='1'){ setTimeout(function(){ nfGdGetToken(false).then(function(){ nfGdOn=true; try{nfGdUpdateBtn();}catch(_){} }).catch(function(){}); }, 2500); } }catch(_){}
+/* ★ 진입/새로고침만으로는 구글 로그인 안 함 — 세션에 유효 토큰이 있으면 '연결됨' 표시만, 없으면 파일 올리거나 열 때 1회만 연결 */
+try{ if(nfGdOn){ setTimeout(function(){ try{nfGdUpdateBtn();}catch(_){} }, 800); } }catch(_){}
 
 async function attachCommentFile(file){
   if(!file) return;
