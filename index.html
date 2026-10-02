@@ -868,7 +868,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <div class="panel">
       <div class="meta-grid">
         <div class="field"><label>발주처</label><input type="text" id="client" value="" placeholder="예) 고양 능곡대림아파트"></div>
-        <div class="field"><label>공사범위</label><input type="text" id="project" value="" placeholder="공법·범위 선택 시 자동 생성 (직접 입력도 가능)" oninput="projectManual()"></div>
+        <div class="field"><label>공사범위</label><input type="text" id="project" value="" placeholder="자세한 공사범위 직접 입력 (공사명은 공종으로 자동 생성됩니다)" oninput="projectManual()"></div>
         <div class="field"><label>요청사</label><input type="text" id="requester" value="" placeholder="예) ㈜부영씨엔씨 정윤찬 대표"></div>
       </div>
       <div class="field" style="margin-top:12px;"><label>현장 주소 <span class="hint">(검토방 카드에 표시)</span></label><input type="text" id="siteAddr" value="" placeholder="예) 경기 남양주시 ○○로 12"></div>
@@ -1554,6 +1554,28 @@ function calcArea(cid,A,L,isRoof){ const w=workOfCid(cid); const f=(w&&AREA_FORM
 const area = (b,cid) => (b && b.dims && b.dims[cid]) ? calcArea(cid,b.dims[cid].A,b.dims[cid].L,false) : num(b && b.areas ? b.areas[cid] : 0);   /* 본체 면적 (전체면적·둘레 입력 시 산식 적용) */
 const roofArea = (b,cid) => (b && b.roofDims && b.roofDims[cid]) ? calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true) : num(b && b.roof ? b.roof[cid] : 0);   /* 옥탑 면적: 옥탑 둘레계수(roofPerim) 적용 */
 const areaEff = (b,cid) => area(b,cid) + roofArea(b,cid);              /* 계산용 합산(본체+옥탑, 같은 공법) */
+/* ===== 엑셀 수식용 — 동별 면적 산출식 문자열 + 정확값 (예: (100+102*0.1)*1.05) ===== */
+function _numStr(n){ n=+n; if(!isFinite(n)) return '0'; return (Math.round(n*1e6)/1e6).toString(); }
+function areaFormula(b, cid, isRoof){
+  const w=workOfCid(cid); const f=(w&&AREA_FORMULA[w])||{perim:0,mult:1};
+  const pm=(isRoof && f.roofPerim!=null)?f.roofPerim:f.perim;
+  const ml=isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1);
+  const dim = isRoof ? (b&&b.roofDims&&b.roofDims[cid]) : (b&&b.dims&&b.dims[cid]);
+  if(dim){
+    const A=evalExpr(dim.A), L=evalExpr(dim.L), P=num(pm), M=num(ml||1);
+    let expr=_numStr(A);
+    if(P!==0 && L!==0) expr='('+_numStr(A)+'+'+_numStr(L)+'*'+_numStr(P)+')';
+    if(M!==1) expr=expr+'*'+_numStr(M);
+    return {f:expr, v:(A+L*P)*M};
+  }
+  const v = isRoof ? num(b&&b.roof?b.roof[cid]:0) : num(b&&b.areas?b.areas[cid]:0);
+  return {f:null, v:v};   /* 직접 입력 면적 → 수식 없이 값만 */
+}
+function roofFormulaSum(b){   /* 옥탑 열: 여러 공법 옥탑 면적의 합 → (…)+(…) */
+  let parts=[], v=0;
+  (categories||[]).forEach(c=>{ const rf=areaFormula(b,c.id,true); if(rf.v>0){ parts.push(rf.f?('('+rf.f+')'):_numStr(rf.v)); v+=rf.v; } });
+  return {f: parts.length?parts.join('+'):null, v:v};
+}
 let showRoof = false;
 
 /* 바탕정리: 슬라브(dual)+PVC 면적 합 × 선택 비율 → 수량 자동 동기화 */
@@ -2236,17 +2258,36 @@ const NOTICE_PRESETS=[
   '전용부의 화분 및 기타 지장물 등은 공사 전에 반드시 이동해 주시기 바랍니다.',
   '조립식 벤츄레이터 치켜올림 불가함을 안내드립니다.',
   '배관방수트랩 및 캐노피 개수는 현장방문 후 달라질 수 있음을 안내드립니다.',
-  '본 내역서는 2026년 8월 1일부터 적용되는 인하 단가를 미리 반영하여 작성된 내역서입니다. 참고하여 검토해 주시면 감사하겠습니다.'
+  '본 내역서는 2026년 8월 1일부터 적용되는 인하 단가를 미리 반영하여 작성된 내역서입니다. 참고하여 검토해 주시면 감사하겠습니다.',
+  '후레싱 부위는 별도 작업이 없으며, 별도 작업이 필요한 경우 추가비용이 발생됩니다.'
 ];
+/* 공종 전용 안내문구 — 해당 공종이 쓰이면 자동으로 체크(사용자가 직접 끄면 유지) */
+const WORK_NOTICES={ metal:'후레싱 부위는 별도 작업이 없으며, 별도 작업이 필요한 경우 추가비용이 발생됩니다.' };
+let noticeUserSet={};   /* 사용자가 직접 체크/해제한 문구 → 자동동기화 제외 */
+function workActiveForNotice(w){ try{ return activeWorks.includes(w) || categories.some(c=>c.mode==='recipe'&&c.work===w&&buildings.some(b=>areaEff(b,c.id)>0)); }catch(e){ return false; } }
+function syncWorkNotices(){
+  let changed=false;
+  Object.keys(WORK_NOTICES).forEach(w=>{ const t=WORK_NOTICES[w]; if(!NOTICE_PRESETS.includes(t)) NOTICE_PRESETS.push(t);
+    if(noticeUserSet[t]) return;                 /* 사용자가 직접 정한 문구는 건드리지 않음 */
+    const active=workActiveForNotice(w);
+    if(active && !selectedNotices.includes(t)){ selectedNotices.push(t); changed=true; }
+    else if(!active && selectedNotices.includes(t)){ selectedNotices=selectedNotices.filter(x=>x!==t); changed=true; }
+  });
+  if(changed){ saveNotices(); if(typeof renderNotices==='function') renderNotices(); }
+}
 let selectedNotices=[];
 const NOTICE_REMOVED=['추가로 발생되는 바탕 정리 비용은 별도임을 안내드립니다.'];
 function loadNotices(){ try{ const s=localStorage.getItem('nf_notices'); selectedNotices=s?JSON.parse(s):[]; }catch(e){ selectedNotices=[]; } if(!Array.isArray(selectedNotices)) selectedNotices=[]; const before=selectedNotices.length; selectedNotices=selectedNotices.filter(t=>!NOTICE_REMOVED.includes(t)); if(selectedNotices.length!==before){ try{ localStorage.setItem('nf_notices', JSON.stringify(selectedNotices)); }catch(e){} } selectedNotices.forEach(t=>{ if(!NOTICE_PRESETS.includes(t) && !NOTICE_REMOVED.includes(t)) NOTICE_PRESETS.push(t); }); }
 function saveNotices(){ try{ localStorage.setItem('nf_notices', JSON.stringify(selectedNotices)); }catch(e){} }
 function renderNotices(){ const host=document.getElementById('noticeList'); if(!host) return;
+  const WL={metal:'금속기와',shingle:'싱글',dual:'슬라브',drain:'배수로',pvc:'PVC'};
   host.innerHTML=NOTICE_PRESETS.map((t,i)=>{ const on=selectedNotices.includes(t);
-    return '<label class="notice-item'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleNoticeIdx('+i+',this.checked)"><span>'+pcEsc(t)+'</span></label>'; }).join('');
+    const wtag=Object.keys(WORK_NOTICES).find(w=>WORK_NOTICES[w]===t);
+    const badge=wtag?' <span style="font-size:10px;font-weight:700;color:#B5651D;background:#FFF3EE;border:1px solid #E0A99D;border-radius:10px;padding:1px 6px;margin-left:4px;white-space:nowrap;">'+((WL[wtag]||wtag)+' 전용'+(workActiveForNotice(wtag)?' · 사용중':''))+'</span>':'';
+    return '<label class="notice-item'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleNoticeIdx('+i+',this.checked)"><span>'+pcEsc(t)+badge+'</span></label>'; }).join('');
 }
-function toggleNoticeIdx(i,on){ const t=NOTICE_PRESETS[i]; if(t==null)return; if(on){ if(!selectedNotices.includes(t)) selectedNotices.push(t); } else { selectedNotices=selectedNotices.filter(x=>x!==t); } saveNotices(); renderNotices(); if(typeof recalc==='function') recalc(); }
+function toggleNoticeIdx(i,on){ const t=NOTICE_PRESETS[i]; if(t==null)return; noticeUserSet[t]=true;   /* 사용자가 직접 정함 → 자동동기화 제외 */
+  if(on){ if(!selectedNotices.includes(t)) selectedNotices.push(t); } else { selectedNotices=selectedNotices.filter(x=>x!==t); } saveNotices(); renderNotices(); if(typeof recalc==='function') recalc(); }
 function addCustomNotice(){ const el=document.getElementById('noticeCustom'); if(!el)return; const v=(el.value||'').trim(); if(!v)return; if(!NOTICE_PRESETS.includes(v)) NOTICE_PRESETS.push(v); if(!selectedNotices.includes(v)) selectedNotices.push(v); el.value=''; saveNotices(); renderNotices(); if(typeof recalc==='function') recalc(); }
 window.toggleNoticeIdx=toggleNoticeIdx; window.addCustomNotice=addCustomNotice;
 function updBname(i,v){ buildings[i].name=v; renderAreaSheet(compute()); }
@@ -2419,15 +2460,14 @@ function renderCost(d){
       <tr class="total-row"><td class="t-left">총 공사비</td><td class="t-center t-sub">VAT 별도</td><td class="t-num">${won(d.total)} 원</td></tr>
     </tbody></table></div>`;
 }
-function recalc(){ syncPrep(); syncWaste(); syncWall(); applyAutoProject(); const d=compute(); window.__lastD=d; renderAutoQty(d); renderSummary(d); renderLedger(d); renderDetail(d); renderCost(d); renderAreaSheet(d); renderQuote(d); try{ var _cv=$('#view-cross'); if(_cv && _cv.style.display==='block') crossRenderResults(); }catch(e){} try{ if(typeof wfSyncBar==='function') wfSyncBar(); }catch(e){} try{ if(typeof fnPreview==='function') fnPreview(); }catch(e){} }
+function recalc(){ syncPrep(); syncWaste(); syncWall(); applyAutoProject(); try{ syncWorkNotices(); }catch(e){} const d=compute(); window.__lastD=d; renderAutoQty(d); renderSummary(d); renderLedger(d); renderDetail(d); renderCost(d); renderAreaSheet(d); renderQuote(d); try{ var _cv=$('#view-cross'); if(_cv && _cv.style.display==='block') crossRenderResults(); }catch(e){} try{ if(typeof wfSyncBar==='function') wfSyncBar(); }catch(e){} try{ if(typeof fnPreview==='function') fnPreview(); }catch(e){} }
 /* 공사범위 자동 생성 — 동별 면적이 입력된 공법으로 구성 (슬라브: 단독이면 '슬라브', 타 공법과 함께면 '배수로') */
 function autoProjectName(){
-  const WT={shingle:'싱글', metal:'금속기와', dual:'슬라브', pvc:'PVC', metalpaint:'금속기와도장'};
-  const ORDER=['shingle','metal','dual','pvc','metalpaint'];
+  const WT={shingle:'싱글', metal:'금속기와', dual:'슬라브', drain:'배수로', pvc:'PVC', metalpaint:'금속기와도장'};
+  const ORDER=['shingle','metal','dual','drain','pvc','metalpaint'];
   const keys=ORDER.filter(k=>categories.some(c=>c.mode==='recipe'&&c.work===k&&buildings.some(b=>areaEff(b,c.id)>0)));
   if(!keys.length) return '';
-  const multi=keys.length>1;
-  return '옥상 '+keys.map(k=>(k==='dual'&&multi)?'배수로':WT[k]).join(' 및 ')+' 방수공사';
+  return '옥상 '+keys.map(k=>WT[k]).join(' 및 ')+' 방수공사';   /* 공종별 자동: 예) 옥상 금속기와 및 배수로 방수공사 */
 }
 function applyAutoProject(){ if(!projectAuto) return; const nm=autoProjectName(); if(nm && $('#project')) $('#project').value=nm; }
 function projectManual(){ projectAuto=false; }
@@ -4846,7 +4886,8 @@ async function buildConsultingWorkbook(d){
   /* 좌측 기본 정보 */
   cv('B7','▶ 견적일자 :',{size:13}); cov.mergeCells('D7:E7'); cv('D7',dateStr,{size:12});
   cv('B8','▶ 발 주 처  :',{size:13}); cv('D8',clientName,{size:12});
-  cv('B9','▶ 공 사 명  :',{size:13}); cv('D9',projectName,{size:12});
+  const autoName=(typeof autoProjectName==='function')?(autoProjectName()||''):'';   /* 공사명 = 공종 기반(옥상 금속기와 및 배수로 방수공사) */
+  cv('B9','▶ 공 사 명  :',{size:13}); cv('D9',autoName||projectName,{size:12});
   cv('B10','▶ 공사금액 :',{size:13}); cov.mergeCells('D10:E10'); cv('D10',d.total,{size:13,al:'center',fmt:FMT}); cv('F10','     (VAT 별도)',{size:13});
   [6,7,8,9,10].forEach(r=>cov.getRow(r).height=19.5);
   cov.getRow(11).height=15.8;
@@ -4856,7 +4897,9 @@ async function buildConsultingWorkbook(d){
   const facSuffix=hasFacility?'_부대시설포함':'_부대시설미포함';
   let scopeTxt='';
   if(scopeDongs.length){ const anyRoof=scopeDongs.some(b=>categories.some(c=>roofArea(b,c.id)>0)); const totalDong=num(gv('totalDong')); const N=scopeDongs.reduce((s,b)=>s+dongCount(b),0); const scopeTag=totalDong>0?(N>=totalDong?'(전체동)':'(일부동)'):''; scopeTxt=N+'개동'+scopeTag+' 옥상방수공사'+(anyRoof?'_옥탑포함':'_옥탑미포함')+facSuffix; }
-  cov.mergeCells('B12:N12'); cv('B12','▶ 공사 범위 : '+scopeTxt,{size:10}); cov.getRow(12).height=21;
+  /* 공사범위 = 사용자가 직접 입력한 범위(공사명과 다르면 그 값) 우선, 없으면 자동 범위 */
+  const scopeFinal=(projectName && autoName && projectName!==autoName) ? projectName : scopeTxt;
+  cov.mergeCells('B12:N12'); cv('B12','▶ 공사 범위 : '+scopeFinal,{size:10}); cov.getRow(12).height=21;
   /* 실행가 설정 근거 박스 */
   cov.mergeCells('B13:N13'); cv('B13','실행가 설정 근거',{size:12,bold:true,al:'center'}); cov.getRow(13).height=18;
   let rw=14;
@@ -4997,12 +5040,12 @@ async function buildConsultingWorkbook(d){
   const qsheet=wb.addWorksheet('물량산출내역서');
   qsheet.pageSetup={orientation:'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:1,horizontalCentered:true,verticalCentered:false,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.2,footer:0.2}};
   const qCols=[];
-  categories.forEach(c=>{ if(c.mode==='recipe' && activeWorks.includes(c.work)) qCols.push({label:c.label, sur:num(c.sur), get:b=>area(b,c.id)}); });
+  categories.forEach(c=>{ if(c.mode==='recipe' && activeWorks.includes(c.work)) qCols.push({label:c.label, sur:num(c.sur), get:b=>area(b,c.id), fx:b=>areaFormula(b,c.id,false)}); });
   const anyRoofQ=buildings.some(b=>categories.some(c=>roofArea(b,c.id)>0));
   const firstSur=qCols.length?qCols[0].sur:0;
-  if(anyRoofQ) qCols.push({label:'옥탑', sur:firstSur, get:b=>categories.reduce((s,c)=>s+roofArea(b,c.id),0)});
-  categories.forEach(c=>{ if(c.mode==='unit') qCols.push({label:c.label, sur:num(c.sur), get:b=>area(b,c.id)}); });
-  if(!qCols.length) qCols.push({label:'물량', sur:0, get:()=>0});
+  if(anyRoofQ) qCols.push({label:'옥탑', sur:firstSur, get:b=>categories.reduce((s,c)=>s+roofArea(b,c.id),0), fx:b=>roofFormulaSum(b)});
+  categories.forEach(c=>{ if(c.mode==='unit') qCols.push({label:c.label, sur:num(c.sur), get:b=>area(b,c.id), fx:b=>areaFormula(b,c.id,false)}); });
+  if(!qCols.length) qCols.push({label:'물량', sur:0, get:()=>0, fx:()=>({f:null,v:0})});
   const nC=qCols.length, LC=nC+1;   /* 표 마지막 열 */
   /* 오른쪽에 산출근거를 나란히 두기 위한 열 배치: 좌(1..LC) | 간격 | 우(RC0..RC0+1) */
   const RC0=LC+2, LASTCOL=RC0+1;
@@ -5014,24 +5057,42 @@ async function buildConsultingWorkbook(d){
   const topRow=4; let R=topRow;
   const EBq=expandedBuildings();   /* 한 칸에 여러 동 입력 시 개별 동으로 펼침 */
   /* 섹션 렌더 헬퍼 */
-  function qtyTable(title, headerFn, valFn, totFn, totFmt, rowFmt){
+  const colLetter=c=>qsheet.getColumn(c).letter;
+  const baseAddr={};   /* `bi_ci` → 기본물량 셀 주소 (할증후가 수식으로 참조) */
+  function qtyTable(title, headerFn, kind){
     const secTop=R;
     qsheet.mergeCells(R,1,R,LC); const sb=qsheet.getCell(R,1); sb.value=title; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'left',vertical:'middle',indent:1}; fillRow(R,1,LC,'FFCFE9E3'); qsheet.getRow(R).height=22; R++;
     const top=secTop;
     qsheet.getCell(R,1).value='동'; qCols.forEach((col,i)=>qsheet.getCell(R,i+2).value=headerFn(col));
     for(let c=1;c<=LC;c++){ const cell=qsheet.getCell(R,c); cell.alignment={horizontal:'center',vertical:'middle'}; cell.font={name:FONT,bold:true,size:11}; } fillRow(R,1,LC); qsheet.getRow(R).height=21; R++;
-    EBq.forEach(b=>{ qsheet.getCell(R,1).value=b.name; qsheet.getCell(R,1).alignment={horizontal:"center",vertical:"middle"}; qsheet.getCell(R,1).font={name:FONT,size:11}; qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); cell.value=valFn(col,b); cell.numFmt=(rowFmt||FMT2); cell.alignment={horizontal:'right',vertical:'middle'}; cell.font={name:FONT,size:11}; }); qsheet.getRow(R).height=20; R++; });
-    const totals=qCols.map(col=>totFn(col));
+    const dataTop=R;
+    EBq.forEach((b,bi)=>{
+      qsheet.getCell(R,1).value=b.name; qsheet.getCell(R,1).alignment={horizontal:"center",vertical:"middle"}; qsheet.getCell(R,1).font={name:FONT,size:11};
+      qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); const rf=col.fx(b);
+        if(kind==='base'){ cell.value = rf.f ? {formula:rf.f, result:rf.v} : rf.v; baseAddr[bi+'_'+i]=cell.address; }
+        else { const ba=baseAddr[bi+'_'+i], sv=rf.v*(1+col.sur/100); cell.value = ba ? {formula: ba+'*(1+'+_numStr(col.sur)+'/100)', result:sv} : sv; }
+        cell.numFmt=FMT_Q2; cell.alignment={horizontal:'right',vertical:'middle'}; cell.font={name:FONT,size:11};
+      });
+      qsheet.getRow(R).height=20; R++;
+    });
+    const dataBot=R-1;
     qsheet.getCell(R,1).value='전체'; qsheet.getCell(R,1).alignment={horizontal:'center',vertical:'middle'};
-    qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); cell.value=totals[i]; cell.numFmt=totFmt; cell.alignment={horizontal:'right',vertical:'middle'}; });
+    qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); const Lc=colLetter(i+2);
+      const sum=EBq.reduce((s,b)=>s+(kind==='base'?col.fx(b).v:col.fx(b).v*(1+col.sur/100)),0);
+      cell.value=(dataBot>=dataTop)?{formula:'SUM('+Lc+dataTop+':'+Lc+dataBot+')', result:sum}:sum;
+      cell.numFmt=FMT_Q2; cell.alignment={horizontal:'right',vertical:'middle'};
+    });
+    const totalRow=R;
     for(let c=1;c<=LC;c++) qsheet.getCell(R,c).font={name:FONT,bold:true,size:11}; fillRow(R,1,LC); qsheet.getRow(R).height=21; R++;
     qsheet.getCell(R,1).value='총물량'; qsheet.getCell(R,1).alignment={horizontal:'center',vertical:'middle'};
-    const g=qsheet.getCell(R,2); g.value=totals.reduce((a,x)=>a+x,0); g.numFmt=totFmt; g.alignment={horizontal:'right',vertical:'middle'};
+    const g=qsheet.getCell(R,2), firstL=colLetter(2), lastL=colLetter(LC);
+    const gtot=EBq.reduce((s,b)=>qCols.reduce((ss,col)=>ss+(kind==='base'?col.fx(b).v:col.fx(b).v*(1+col.sur/100)),s),0);
+    g.value=(LC>=2)?{formula:'SUM('+firstL+totalRow+':'+lastL+totalRow+')', result:gtot}:gtot; g.numFmt=FMT_Q2; g.alignment={horizontal:'right',vertical:'middle'};
     for(let c=1;c<=LC;c++) qsheet.getCell(R,c).font={name:FONT,bold:true,size:11}; fillRow(R,1,LC); qsheet.getRow(R).height=21; R++;
     frame(qsheet,top,1,R-1,LC); R+=1;
   }
-  qtyTable('［ 기본 물량 ］', col=>col.label+' (㎡)', (col,b)=>col.get(b), col=>EBq.reduce((s,b)=>s+col.get(b),0), FMT_Q2, FMT_Q2);
-  qtyTable('［ 할증 후 물량 ］', col=>col.label+' ('+Math.round(col.sur)+'%)', (col,b)=>col.get(b)*(1+col.sur/100), col=>EBq.reduce((s,b)=>s+col.get(b)*(1+col.sur/100),0), FMT_Q2, FMT_Q2);
+  qtyTable('［ 기본 물량 ］', col=>col.label+' (㎡)', 'base');
+  qtyTable('［ 할증 후 물량 ］', col=>col.label+' ('+Math.round(col.sur)+'%)', 'sur');
   const leftBottom=R;
   /* 산출근거 — 기본·할증 표의 '오른쪽'에 배치 (아래로 길게 이어지지 않게) */
   let RR=topRow;
@@ -5544,7 +5605,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync21';
+const APP_VER='2026-10-02-sync22';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
