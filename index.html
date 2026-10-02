@@ -5605,7 +5605,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync24';
+const APP_VER='2026-10-02-sync25';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6409,7 +6409,7 @@ function renderDetail(){
   (function(){ const comp=$('#detailModal') && $('#detailModal').querySelector('.composer'); if(!comp) return;
     comp.addEventListener('dragover',e=>{ e.preventDefault(); comp.style.outline='2px dashed #2a5ad3'; comp.style.outlineOffset='3px'; comp.style.background='#f1f6f9'; });
     comp.addEventListener('dragleave',e=>{ if(!comp.contains(e.relatedTarget)){ comp.style.outline=''; comp.style.background=''; } });
-    comp.addEventListener('drop',async e=>{ e.preventDefault(); comp.style.outline=''; comp.style.background=''; const fs=Array.from((e.dataTransfer&&e.dataTransfer.files)||[]); for(const f of fs){ await attachCommentFile(f); } });
+    comp.addEventListener('drop',async e=>{ e.preventDefault(); comp.style.outline=''; comp.style.background=''; const fs=Array.from((e.dataTransfer&&e.dataTransfer.files)||[]); try{ await nfGdMaybeAutoConnect(); }catch(_){} for(const f of fs){ await attachCommentFile(f); } });
   })();
   $('#cLink').onclick=()=>{const u=prompt('드라이브/공유 링크 URL:');if(u&&u.trim()){const n=prompt('표시 이름(선택):')||'';detailLinks.push({name:n.trim()||u.trim(),url:u.trim()});renderStaged();}};
   $('#cPost').onclick=postComment;
@@ -6546,6 +6546,15 @@ async function nfGdFetchBytes(id){
 }
 function nfGdUpdateBtn(){ try{ const b=document.getElementById('cGDrive'); if(b){ b.textContent=nfGdOn?'📁 드라이브 연결됨 ✓':'📁 드라이브 연결'; b.style.color=nfGdOn?'#256B39':''; b.style.borderColor=nfGdOn?'#9bd3ad':''; } }catch(_){} }
 async function nfGdConnect(){ try{ await nfGdGetToken(true); const t=await nfGdGetToken(false); await nfGdEnsureFolder(t); nfGdOn=true; toast('✓ 구글 드라이브 연결됨 — 이제 첨부가 드라이브(15GB)에 저장돼요'); nfGdUpdateBtn(); }catch(e){ console.error('[gd connect]',e); toast('드라이브 연결 실패 — poursolution22 계정으로 로그인했는지 확인해주세요'); } }
+/* 파일 올릴 때 드라이브가 아직 연결 안 됐으면 자동으로 연결 시도(한 번만) — 성공하면 그 뒤론 전부 자동 드라이브 */
+let _gdAutoTried=false;
+async function nfGdMaybeAutoConnect(){
+  if(nfGdOn) return true;
+  try{ if(localStorage.getItem('nf_gd_enabled')==='1'){ await nfGdGetToken(false); nfGdOn=true; nfGdUpdateBtn(); return true; } }catch(_){}
+  if(_gdAutoTried) return false;   /* 이번 세션에 이미 시도(취소)했으면 더 안 물어봄 — 공유DB로 */
+  _gdAutoTried=true;
+  try{ toast('구글 드라이브에 저장하려면 한 번만 연결해주세요 (poursolution22)'); await nfGdGetToken(true); const t=await nfGdGetToken(false); await nfGdEnsureFolder(t); nfGdOn=true; nfGdUpdateBtn(); toast('✓ 드라이브 연결됨 — 이제 자동 저장됩니다'); return true; }catch(_){ return false; }
+}
 try{ window.nfGdConnect=nfGdConnect; }catch(_){}
 try{ if(localStorage.getItem('nf_gd_enabled')==='1'){ setTimeout(function(){ nfGdGetToken(false).then(function(){ nfGdOn=true; try{nfGdUpdateBtn();}catch(_){} }).catch(function(){}); }, 2500); } }catch(_){}
 
@@ -6574,7 +6583,7 @@ async function attachCommentFile(file){
   if(file.size<=MAX_EMBED){ try{ const d=await nfReadDataUrl(file); detailLinks.push({name:file.name,url:d}); renderStaged(); toast('첨부됨'); }catch(_){ toast('첨부 실패'); } }
   else{ toast('큰 파일은 팀 공유 연결 후 첨부 가능합니다'); }
 }
-$('#hiddenFile').onchange=async function(){ const files=Array.from(this.files||[]); this.value=''; for(const f of files){ await attachCommentFile(f); } };
+$('#hiddenFile').onchange=async function(){ const files=Array.from(this.files||[]); this.value=''; try{ await nfGdMaybeAutoConnect(); }catch(_){} for(const f of files){ await attachCommentFile(f); } };
 
 /* ---------- add / edit ---------- */
 function fillStageSelect(){$('#f_status').innerHTML=STAGES.map(s=>`<option value="${s.key}">${s.label}</option>`).join('');}
@@ -6630,6 +6639,8 @@ async function nfUploadAttachment(file, reviewId){
 }
 async function collectModalFiles(){
   const links=[];
+  const hasFile=['f_xls','f_cad'].some(id=>{ const inp=$('#'+id); return inp&&inp.files&&inp.files[0]; });
+  if(hasFile){ try{ await nfGdMaybeAutoConnect(); }catch(_){} }
   for(const id of ['f_xls','f_cad']){
     const inp=$('#'+id); const f=inp&&inp.files&&inp.files[0];
     if(!f) continue;
