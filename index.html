@@ -5646,7 +5646,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync31';
+const APP_VER='2026-10-02-sync32';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6144,8 +6144,9 @@ function render(){
   }
   reviews.forEach(r=>{total++;if(r.status!=='done'){prog++;const dd=ddayInfo(r.due);if(dd&&dd.diff<=2)urgent++;}});
   $('#stTotal').textContent=total;$('#stProg').textContent=prog;$('#stUrgent').textContent=urgent;
-  wireDnD(); updateModeBtn();
-  try{ if(window.renderHome) window.renderHome(); }catch(e){}   /* 대시보드가 바뀌면 홈 업무현황도 같이 갱신(단계변경·동기화 반영) */
+  try{ wireDnD(); }catch(e){ console.error('wireDnD',e); }
+  try{ updateModeBtn(); }catch(e){}
+  try{ if(window.renderHome) window.renderHome(); }catch(e){ console.error('renderHome',e); }   /* ★ 홈 업무현황 항상 갱신 — 중간 오류로 건너뛰지 않게 try로 분리 */
 }
 /* 화면 크기 바뀌면(직접 선택 안 했을 때만) 자동 전환 */
 window.addEventListener('resize', (function(){ let t; return function(){ clearTimeout(t); t=setTimeout(function(){ try{ if(!localStorage.getItem(BOARD_MODE_KEY) && board){ render(); } }catch(e){} }, 200); }; })());
@@ -6786,7 +6787,9 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeD
 fillStageSelect();
 (async()=>{ await load(); render(); try{ if(window.renderHome) window.renderHome(); }catch(e){}
   try{ nfInstallHooks(); }catch(e){ console.error('[nfCloud] hooks',e); }
-  try{ nfCloudStatus(); if(nfReadCfg()){ await nfCloud.connect(); } }catch(e){ console.error('[nfCloud] init',e); } })();
+  try{ nfCloudStatus(); if(nfReadCfg()){ await nfCloud.connect(); } }catch(e){ console.error('[nfCloud] init',e); }
+  /* 클라우드에서 검토 카드가 늦게 도착해도 홈 '검토 진행중'이 반영되도록 몇 번 더 갱신 */
+  [1200,3000,6000].forEach(function(ms){ setTimeout(function(){ try{ if(window.renderHome) window.renderHome(); }catch(e){} }, ms); }); })();
 
 
 window.NF_DASH = {
