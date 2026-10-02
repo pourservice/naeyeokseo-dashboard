@@ -1206,7 +1206,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <button class="btn btn-ghost" id="modeBtn" onclick="toggleBoardMode()" title="칸반 / 목록 보기 전환">☰ 목록</button>
     <span id="shareStatus" class="share-badge">○ 팀 공유 꺼짐</span>
     <button class="btn btn-ghost" id="shareBtn" onclick="openShare()" title="팀원과 실시간으로 검토방을 공유합니다">🔗 팀 공유</button>
-    <button class="btn btn-ghost" id="gdMigBtn" onclick="nfGdMigrateAll()" title="기존 첨부를 구글 드라이브로 옮기고, 모든 드라이브 파일을 '링크 있는 사람 누구나 보기'로 공개 → 팀원 누구나 로그인 없이 다운로드" style="display:none">📦 드라이브 이관·공개</button>
+    <button class="btn btn-ghost" id="gdMigBtn" onclick="nfGdMigrateAll()" title="기존 첨부를 구글 드라이브로 옮기고, 모든 드라이브 파일을 '링크 있는 사람 누구나 보기'로 공개 → 팀원 누구나 로그인 없이 다운로드">📦 드라이브 이관·공개</button>
     <button class="btn btn-ghost" id="xlsBtn">⬇ 현황표</button>
     <button class="btn btn-primary" id="addBtn">＋ 새 현장</button>
   </div>
@@ -5646,7 +5646,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync29';
+const APP_VER='2026-10-02-sync31';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6315,7 +6315,10 @@ async function nfPreviewFile(f){
       show(0);
       body.querySelectorAll('.fp-tabs button').forEach(b=>b.onclick=()=>{ body.querySelectorAll('.fp-tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); show(+b.dataset.si); });
     } else if(ext==='pdf'){
-      let u=f.url; if(String(u).indexOf('gdrive:')===0){ const buf=await nfGdFetchBytes(String(u).slice(7)); u=URL.createObjectURL(new Blob([buf],{type:'application/pdf'})); } else if(String(u).indexOf('rtdb:')===0){ const r=await nfRtdbFetch(String(u).slice(5)); u=r.dataUrl; }
+      /* gdrive는 위에서 구글 뷰어로 처리됨. rtdb·data PDF는 blob으로 변환(크롬이 data: PDF를 iframe에서 차단하는 문제 방지) */
+      let u=f.url;
+      if(String(u).indexOf('rtdb:')===0){ const r=await nfRtdbFetch(String(u).slice(5)); u=URL.createObjectURL(new Blob([nfB64ToBuf(r.b64)],{type:'application/pdf'})); }
+      else if(String(u).indexOf('data:')===0){ u=URL.createObjectURL(new Blob([nfB64ToBuf(String(u).slice(String(u).indexOf(',')+1))],{type:'application/pdf'})); }
       body.innerHTML='<iframe class="fp-frame" src="'+esc(u)+'"></iframe>';
     } else if(['png','jpg','jpeg','gif','webp','bmp','svg'].indexOf(ext)>=0){
       let u=f.url; if(String(u).indexOf('gdrive:')===0){ const buf=await nfGdFetchBytes(String(u).slice(7)); u=URL.createObjectURL(new Blob([buf],{type:nfMimeFromName(f.name)})); } else if(String(u).indexOf('rtdb:')===0){ const r=await nfRtdbFetch(String(u).slice(5)); u=r.dataUrl; }
@@ -6324,7 +6327,7 @@ async function nfPreviewFile(f){
       body.innerHTML='<div class="fp-msg">이 형식('+(ext||'파일')+')은 화면 미리보기를 지원하지 않습니다.<br>위 <b>⬇ 다운로드</b>로 받아서 열어주세요.</div>';
     }
   }catch(e){ console.error('[preview]',e);
-    body.innerHTML='<div class="fp-msg">미리보기를 불러오지 못했습니다.<br>(다른 PC가 올린 파일은 파이어베이스 스토리지 설정이 끝나면 미리보기가 됩니다.)<br>지금은 위 <b>⬇ 다운로드</b> 또는 <b>↗ 새 탭</b>으로 열어주세요.</div>';
+    body.innerHTML='<div class="fp-msg">미리보기를 불러오지 못했습니다. (파일은 정상이에요)<br>위 <b>⬇ 다운로드</b> 또는 <b>↗ 새 탭</b>으로 열어주세요.</div>';
   }
 }
 function nfPreviewReg(id){ nfPreviewFile(nfFileReg[id]); }
@@ -6601,7 +6604,7 @@ async function nfGdFetchBytes(id){
   if(!r.ok) throw new Error('드라이브 다운로드 실패 '+r.status);
   return await r.arrayBuffer();
 }
-function nfGdUpdateBtn(){ try{ const b=document.getElementById('cGDrive'); if(b){ b.textContent=nfGdOn?'📁 드라이브 연결됨 ✓':'📁 드라이브 연결'; b.style.color=nfGdOn?'#256B39':''; b.style.borderColor=nfGdOn?'#9bd3ad':''; } const m=document.getElementById('gdMigBtn'); if(m){ m.style.display=nfGdOn?'':'none'; } }catch(_){} }
+function nfGdUpdateBtn(){ try{ const b=document.getElementById('cGDrive'); if(b){ b.textContent=nfGdOn?'📁 드라이브 연결됨 ✓':'📁 드라이브 연결'; b.style.color=nfGdOn?'#256B39':''; b.style.borderColor=nfGdOn?'#9bd3ad':''; } const m=document.getElementById('gdMigBtn'); if(m){ m.style.display=''; m.style.color=nfGdOn?'#256B39':''; m.style.borderColor=nfGdOn?'#9bd3ad':''; } }catch(_){} }
 async function nfGdConnect(){ try{ await nfGdGetToken(true); const t=await nfGdGetToken(false); await nfGdEnsureFolder(t); nfGdOn=true; toast('✓ 구글 드라이브 연결됨 — 이제 첨부가 드라이브(15GB)에 저장돼요'); nfGdUpdateBtn(); }catch(e){ console.error('[gd connect]',e); toast('드라이브 연결 실패 — poursolution22 계정으로 로그인했는지 확인해주세요'); } }
 /* 파일 올릴 때 드라이브가 아직 연결 안 됐으면 자동으로 연결 시도(한 번만) — 성공하면 그 뒤론 전부 자동 드라이브 */
 let _gdAutoTried=false;
