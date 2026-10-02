@@ -5604,6 +5604,10 @@ function nfAddDelCommentId(id){ if(id==null) return; try{ const s=new Set(nfDelC
 /* 댓글 union — 양쪽 기기에서 단 댓글을 모두 보존(id 기준), 삭제표식은 제외, 시간순 정렬 */
 function nfMergeComments(a,b){
   const del=new Set(nfDelCommentIds());
+  /* 첨부 링크 우선순위: gdrive > rtdb > data > 기타 — 동기화 시 더 좋은 링크(구글드라이브)가 항상 이기게(rtdb로 되돌아가는 문제 방지) */
+  const rank=u=>{u=String(u||'');return u.indexOf('gdrive:')===0?3:(u.indexOf('rtdb:')===0?2:(u.indexOf('data:')===0?1:(u?0:-1)));};
+  const bestLink={};
+  (a||[]).concat(b||[]).forEach(c=>{ if(!c||c.id==null) return; (c.links||[]).forEach(l=>{ if(!l||!l.name) return; const k=String(c.id)+'|'+l.name; const cur=bestLink[k]; if(!cur || rank(l.url)>rank(cur.url)) bestLink[k]={url:l.url,size:l.size}; }); });
   const map=new Map(); const noId=[];
   const score=c=>(c&&c.edited)?String(c.edited):'';   /* 수정시각 — 있으면 최신 수정본이 이김(기기 간 수정 동기화) */
   (a||[]).concat(b||[]).forEach(c=>{ if(!c) return; const id=c.id; if(id!=null && del.has(String(id))) return;   /* 삭제한 댓글은 되살리지 않음 */
@@ -5613,6 +5617,8 @@ function nfMergeComments(a,b){
     else if(score(c)>score(prev)){ map.set(k,c); }   /* 더 최근에 수정된 쪽을 보존 */
   });
   const res=[...map.values()].concat(noId);
+  /* 이긴 댓글의 링크를 '가장 좋은 링크'로 업그레이드 — gdrive 링크가 rtdb/data를 덮어쓰게 */
+  res.forEach(c=>{ if(c&&c.id!=null&&Array.isArray(c.links)){ c.links.forEach(l=>{ if(l&&l.name){ const bb=bestLink[String(c.id)+'|'+l.name]; if(bb && rank(bb.url)>rank(l.url)){ l.url=bb.url; if(bb.size!=null&&l.size==null)l.size=bb.size; } } }); } });
   res.sort((x,y)=>{ const tx=(x&&x.ts)||''; const ty=(y&&y.ts)||''; return tx<ty?-1:(tx>ty?1:0); });
   return res;
 }
@@ -5646,7 +5652,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync32';
+const APP_VER='2026-10-02-sync33';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6595,6 +6601,16 @@ async function nfGdSetPublic(id, token){
   const r=await nfGdApi('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'/permissions?fields=id', {method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body:JSON.stringify({role:'reader', type:'anyone'})});
   return r.ok;   /* 이미 공개면 실패해도 무방 */
 }
+/* 폴더 안에서 같은 이름의 파일을 찾아 id 반환 — 깨진 rtdb 링크 복구용(이관 때 올렸는데 링크만 되돌아간 파일 재연결) */
+async function nfGdFindByName(name, token){
+  token=token||await nfGdGetToken(false);
+  const folderId=await nfGdEnsureFolder(token);
+  const q="name='"+String(name).replace(/'/g,"\\'")+"' and '"+folderId+"' in parents and trashed=false";
+  const r=await nfGdApi('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime)&spaces=drive&orderBy=modifiedTime desc', {headers:{Authorization:'Bearer '+token}});
+  if(!r.ok) return null;
+  const j=await r.json();
+  return (j.files&&j.files.length)?j.files[0].id:null;
+}
 /* 공개 파일용 URL — 로그인 불필요 */
 function nfGdDownloadUrl(id){ return 'https://drive.usercontent.google.com/download?id='+id+'&export=download&confirm=t'; }
 function nfGdViewUrl(id){ return 'https://drive.google.com/file/d/'+id+'/view'; }
@@ -6630,21 +6646,30 @@ async function nfGdMigrateAll(){
   (reviews||[]).forEach(r=>{ (r.comments||[]).forEach(c=>{ (c.links||[]).forEach(l=>{ if(l && typeof l.url==='string' && l.url.indexOf('gdrive:')===0) gids.add(l.url.slice(7)); }); }); });
   if(!jobs.length && !gids.size){ toast('이관/공개할 파일이 없어요 ✓'); return; }
   if(!confirm('기존 첨부를 구글 드라이브로 옮기고( '+jobs.length+'개 ), 모든 드라이브 파일을 "링크 있는 사람 누구나 보기"로 공개합니다.\n→ 팀원 누구나 로그인 없이 다운로드/열람 가능해집니다.\n끝날 때까지 이 창을 닫지 마세요. 시작할까요?')) return;
-  let ok=0, fail=0; const rtdbToDel=[];
+  let ok=0, fail=0, recov=0, lost=0; const rtdbToDel=[];
   for(let i=0;i<jobs.length;i++){
     const j=jobs[i], l=j.l, url=l.url;
     toast('⬆ 드라이브로 이관 중… '+(i+1)+'/'+jobs.length+' '+(l.name||''));
     try{
-      let bytes, name=l.name||'file', mime;
-      if(url.indexOf('rtdb:')===0){ const ft=await nfRtdbFetch(url.slice(5)); bytes=nfB64ToBuf(ft.b64); name=l.name||ft.name||'file'; mime=ft.mime||nfMimeFromName(name); }
-      else { bytes=nfB64ToBuf(url.slice(url.indexOf(',')+1)); mime=((url.slice(5,url.indexOf(','))||'').split(';')[0])||nfMimeFromName(name); }
-      const file=new File([bytes], name, {type:mime||nfMimeFromName(name)});
-      const key=await nfGdUpload(file, j.r.id);
-      const chk=await nfGdFetchBytes(key.slice(7));   /* 드라이브 복사본이 실제로 열리는지 확인 후에만 원본 교체 */
-      if(!chk || chk.byteLength===0) throw new Error('verify 0 bytes');
-      l.url=key; if(l.size==null) l.size=file.size;
-      if(url.indexOf('rtdb:')===0) rtdbToDel.push(url.slice(5));
-      ok++; await save();   /* 한 건마다 저장 — 중간에 멈춰도 진행분은 보존 */
+      let bytes=null, name=l.name||'file', mime;
+      try{
+        if(url.indexOf('rtdb:')===0){ const ft=await nfRtdbFetch(url.slice(5)); bytes=nfB64ToBuf(ft.b64); name=l.name||ft.name||'file'; mime=ft.mime||nfMimeFromName(name); }
+        else { bytes=nfB64ToBuf(url.slice(url.indexOf(',')+1)); mime=((url.slice(5,url.indexOf(','))||'').split(';')[0])||nfMimeFromName(name); }
+      }catch(fe){ bytes=null; }   /* RTDB 원본이 지워진 경우 → 아래에서 드라이브에서 이름으로 복구 */
+      if(bytes && bytes.byteLength>0){
+        const file=new File([bytes], name, {type:mime||nfMimeFromName(name)});
+        const key=await nfGdUpload(file, j.r.id);
+        const chk=await nfGdFetchBytes(key.slice(7));   /* 드라이브 복사본이 실제로 열리는지 확인 후에만 원본 교체 */
+        if(!chk || chk.byteLength===0) throw new Error('verify 0 bytes');
+        l.url=key; if(l.size==null) l.size=file.size;
+        if(url.indexOf('rtdb:')===0) rtdbToDel.push(url.slice(5));
+        ok++; await save();
+      } else {
+        /* 원본 데이터가 없음 → 지난 이관 때 올라간 드라이브 파일을 이름으로 찾아 재연결(복구) */
+        const gid=await nfGdFindByName(name);
+        if(gid){ try{ await nfGdSetPublic(gid); }catch(_){}; l.url='gdrive:'+gid; recov++; await save(); }
+        else { lost++; console.warn('[복구 실패-드라이브에도 없음]', name); }
+      }
     }catch(e){ console.error('[gd migrate]', e, l&&l.name); fail++; }
   }
   if(rtdbToDel.length && nfCloud.on && nfCloud.rtdb){ for(const fid of rtdbToDel){ try{ await nfCloud.rtdb.ref('attach/'+fid).remove(); }catch(_){} } }   /* 확인된 원본만 삭제 → 1GB 회수 */
@@ -6653,7 +6678,7 @@ async function nfGdMigrateAll(){
   let pub=0, pubFail=0, pi=0; const gidArr=Array.from(gids);
   for(const id of gidArr){ pi++; toast('🔓 공개 전환 중… '+pi+'/'+gidArr.length); try{ await nfGdSetPublic(id); pub++; }catch(e){ pubFail++; } }
   try{ render(); }catch(_){} try{ if(currentDetailId) renderDetail(); }catch(_){}
-  toast('완료 — 이관 '+ok+'개'+(fail?('(실패 '+fail+')'):'')+' · 공개 '+pub+'개'+(pubFail?('(실패 '+pubFail+')'):'')+' ✓ 이제 팀원 누구나 로그인 없이 받을 수 있어요');
+  toast('완료 — 이관 '+ok+'개'+(recov?(' · 복구 '+recov+'개'):'')+(lost?(' · 못찾음 '+lost+'개'):'')+(fail?(' · 실패 '+fail+'개'):'')+' · 공개 '+pub+'개 ✓ 이제 팀원 누구나 로그인 없이 받을 수 있어요');
 }
 try{ window.nfGdMigrateAll=nfGdMigrateAll; }catch(_){}
 /* ★ 진입/새로고침만으로는 구글 로그인 안 함 — 세션에 유효 토큰이 있으면 '연결됨' 표시만, 없으면 파일 올리거나 열 때 1회만 연결 */
