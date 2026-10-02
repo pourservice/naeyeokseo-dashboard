@@ -1206,6 +1206,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <button class="btn btn-ghost" id="modeBtn" onclick="toggleBoardMode()" title="칸반 / 목록 보기 전환">☰ 목록</button>
     <span id="shareStatus" class="share-badge">○ 팀 공유 꺼짐</span>
     <button class="btn btn-ghost" id="shareBtn" onclick="openShare()" title="팀원과 실시간으로 검토방을 공유합니다">🔗 팀 공유</button>
+    <button class="btn btn-ghost" id="gdMigBtn" onclick="nfGdMigrateAll()" title="기존에 올린 첨부(엑셀·PDF 등)를 구글 드라이브로 한 번에 옮깁니다" style="display:none">📦 드라이브로 이관</button>
     <button class="btn btn-ghost" id="xlsBtn">⬇ 현황표</button>
     <button class="btn btn-primary" id="addBtn">＋ 새 현장</button>
   </div>
@@ -5605,7 +5606,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync25';
+const APP_VER='2026-10-02-sync26';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6072,6 +6073,7 @@ function toggleBoardMode(){ const nx=(boardMode()==='list')?'kanban':'list'; try
 function updateModeBtn(){ const b=document.getElementById('modeBtn'); if(!b) return; b.textContent=(boardMode()==='list')?'▦ 칸반 보기':'☰ 목록 보기'; }
 window.toggleBoardMode=toggleBoardMode;
 function render(){
+  try{ nfGdUpdateBtn(); }catch(_){}   /* 드라이브 연결 시 헤더 '이관' 버튼 표시 */
   const q=$('#search').value.trim().toLowerCase();
   const mode=boardMode();
   board.innerHTML=''; board.className='board'+(mode==='list'?' list-mode':'');
@@ -6544,7 +6546,7 @@ async function nfGdFetchBytes(id){
   if(!r.ok) throw new Error('드라이브 다운로드 실패 '+r.status);
   return await r.arrayBuffer();
 }
-function nfGdUpdateBtn(){ try{ const b=document.getElementById('cGDrive'); if(b){ b.textContent=nfGdOn?'📁 드라이브 연결됨 ✓':'📁 드라이브 연결'; b.style.color=nfGdOn?'#256B39':''; b.style.borderColor=nfGdOn?'#9bd3ad':''; } }catch(_){} }
+function nfGdUpdateBtn(){ try{ const b=document.getElementById('cGDrive'); if(b){ b.textContent=nfGdOn?'📁 드라이브 연결됨 ✓':'📁 드라이브 연결'; b.style.color=nfGdOn?'#256B39':''; b.style.borderColor=nfGdOn?'#9bd3ad':''; } const m=document.getElementById('gdMigBtn'); if(m){ m.style.display=nfGdOn?'':'none'; } }catch(_){} }
 async function nfGdConnect(){ try{ await nfGdGetToken(true); const t=await nfGdGetToken(false); await nfGdEnsureFolder(t); nfGdOn=true; toast('✓ 구글 드라이브 연결됨 — 이제 첨부가 드라이브(15GB)에 저장돼요'); nfGdUpdateBtn(); }catch(e){ console.error('[gd connect]',e); toast('드라이브 연결 실패 — poursolution22 계정으로 로그인했는지 확인해주세요'); } }
 /* 파일 올릴 때 드라이브가 아직 연결 안 됐으면 자동으로 연결 시도(한 번만) — 성공하면 그 뒤론 전부 자동 드라이브 */
 let _gdAutoTried=false;
@@ -6556,6 +6558,38 @@ async function nfGdMaybeAutoConnect(){
   try{ toast('구글 드라이브에 저장하려면 한 번만 연결해주세요 (poursolution22)'); await nfGdGetToken(true); const t=await nfGdGetToken(false); await nfGdEnsureFolder(t); nfGdOn=true; nfGdUpdateBtn(); toast('✓ 드라이브 연결됨 — 이제 자동 저장됩니다'); return true; }catch(_){ return false; }
 }
 try{ window.nfGdConnect=nfGdConnect; }catch(_){}
+/* ===== 기존 RTDB(또는 이 PC 전용 data:) 첨부를 구글 드라이브로 한 번에 이관 =====
+   드라이브 복사본이 '열리는지' 확인된 뒤에만 원본 RTDB를 지워서 1GB를 회수함. 실패한 건은 원본을 그대로 둬서 계속 열림. */
+async function nfGdMigrateAll(){
+  if(!nfGdOn){ const okc=await nfGdMaybeAutoConnect(); if(!okc){ toast('먼저 구글 드라이브에 연결해주세요 (📁 드라이브 연결)'); return; } }
+  const jobs=[];
+  (reviews||[]).forEach(r=>{ (r.comments||[]).forEach(c=>{ (c.links||[]).forEach(l=>{
+    if(l && typeof l.url==='string' && (l.url.indexOf('rtdb:')===0 || l.url.indexOf('data:')===0)) jobs.push({r,c,l});
+  }); }); });
+  if(!jobs.length){ toast('이관할 파일이 없어요 — 이미 모두 드라이브에 있습니다 ✓'); return; }
+  if(!confirm('기존 첨부 '+jobs.length+'개를 구글 드라이브로 옮깁니다.\n끝날 때까지 이 창을 닫지 마세요.\n시작할까요?')) return;
+  let ok=0, fail=0; const rtdbToDel=[];
+  for(let i=0;i<jobs.length;i++){
+    const j=jobs[i], l=j.l, url=l.url;
+    toast('⬆ 드라이브로 이관 중… '+(i+1)+'/'+jobs.length+' '+(l.name||''));
+    try{
+      let bytes, name=l.name||'file', mime;
+      if(url.indexOf('rtdb:')===0){ const ft=await nfRtdbFetch(url.slice(5)); bytes=nfB64ToBuf(ft.b64); name=l.name||ft.name||'file'; mime=ft.mime||nfMimeFromName(name); }
+      else { bytes=nfB64ToBuf(url.slice(url.indexOf(',')+1)); mime=((url.slice(5,url.indexOf(','))||'').split(';')[0])||nfMimeFromName(name); }
+      const file=new File([bytes], name, {type:mime||nfMimeFromName(name)});
+      const key=await nfGdUpload(file, j.r.id);
+      const chk=await nfGdFetchBytes(key.slice(7));   /* 드라이브 복사본이 실제로 열리는지 확인 후에만 원본 교체 */
+      if(!chk || chk.byteLength===0) throw new Error('verify 0 bytes');
+      l.url=key; if(l.size==null) l.size=file.size;
+      if(url.indexOf('rtdb:')===0) rtdbToDel.push(url.slice(5));
+      ok++; await save();   /* 한 건마다 저장 — 중간에 멈춰도 진행분은 보존 */
+    }catch(e){ console.error('[gd migrate]', e, l&&l.name); fail++; }
+  }
+  if(rtdbToDel.length && nfCloud.on && nfCloud.rtdb){ for(const fid of rtdbToDel){ try{ await nfCloud.rtdb.ref('attach/'+fid).remove(); }catch(_){} } }   /* 확인된 원본만 삭제 → 1GB 회수 */
+  try{ render(); }catch(_){} try{ if(currentDetailId) renderDetail(); }catch(_){}
+  toast('이관 완료 — 성공 '+ok+'개'+(fail?(' · 실패 '+fail+'개(원본 그대로 유지)'):'')+' ✓');
+}
+try{ window.nfGdMigrateAll=nfGdMigrateAll; }catch(_){}
 try{ if(localStorage.getItem('nf_gd_enabled')==='1'){ setTimeout(function(){ nfGdGetToken(false).then(function(){ nfGdOn=true; try{nfGdUpdateBtn();}catch(_){} }).catch(function(){}); }, 2500); } }catch(_){}
 
 async function attachCommentFile(file){
