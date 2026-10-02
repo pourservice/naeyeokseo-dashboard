@@ -5652,7 +5652,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync33';
+const APP_VER='2026-10-02-sync34';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6558,7 +6558,7 @@ async function nfRtdbFetch(fileId){
 const NF_GD_CLIENT_ID='506488368717-as9lbpidc59t59pjojmsg55l1042hvbg.apps.googleusercontent.com';
 const NF_GD_SCOPE='https://www.googleapis.com/auth/drive.file';
 const NF_GD_FOLDER_NAME='POUR 내역서 첨부';
-let nfGdOn=false, _gdTok=null, _gdExp=0, _gdTC=null, _gdPending=null, nfGdFolderId=null;
+let nfGdOn=false, _gdTok=null, _gdExp=0, _gdTC=null, _gdPending=null, nfGdFolderId=null, _gdFolderPub=false;
 try{ nfGdFolderId=localStorage.getItem('nf_gd_folder')||null; }catch(_){}
 /* 토큰을 세션에 캐시 — 같은 탭에서 새로고침/재진입 시 구글 로그인 다시 안 뜨게(토큰 유효 1시간 동안 재사용) */
 try{ const _s=JSON.parse(sessionStorage.getItem('nf_gd_tok')||'null'); if(_s&&_s.t&&_s.e&&Date.now()<_s.e){ _gdTok=_s.t; _gdExp=_s.e; nfGdOn=true; } }catch(_){}
@@ -6574,13 +6574,16 @@ async function nfGdGetToken(interactive){
 }
 async function nfGdApi(url, opt){ opt=opt||{}; let r=await fetch(url, opt); if(r.status===401){ _gdTok=null; _gdExp=0; const t=await nfGdGetToken(false); opt.headers=Object.assign({}, opt.headers||{}, {Authorization:'Bearer '+t}); r=await fetch(url, opt); } return r; }
 async function nfGdEnsureFolder(token){
-  if(nfGdFolderId) return nfGdFolderId;
-  const q=encodeURIComponent("name='"+NF_GD_FOLDER_NAME+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-  let r=await nfGdApi('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&spaces=drive', {headers:{Authorization:'Bearer '+token}});
-  let j=await r.json();
-  if(j&&j.files&&j.files.length){ nfGdFolderId=j.files[0].id; }
-  else { r=await nfGdApi('https://www.googleapis.com/drive/v3/files?fields=id', {method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body:JSON.stringify({name:NF_GD_FOLDER_NAME, mimeType:'application/vnd.google-apps.folder'})}); j=await r.json(); nfGdFolderId=j.id; }
-  try{ localStorage.setItem('nf_gd_folder', nfGdFolderId); }catch(_){}
+  if(!nfGdFolderId){
+    const q=encodeURIComponent("name='"+NF_GD_FOLDER_NAME+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    let r=await nfGdApi('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&spaces=drive', {headers:{Authorization:'Bearer '+token}});
+    let j=await r.json();
+    if(j&&j.files&&j.files.length){ nfGdFolderId=j.files[0].id; }
+    else { r=await nfGdApi('https://www.googleapis.com/drive/v3/files?fields=id', {method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body:JSON.stringify({name:NF_GD_FOLDER_NAME, mimeType:'application/vnd.google-apps.folder'})}); j=await r.json(); nfGdFolderId=j.id; }
+    try{ localStorage.setItem('nf_gd_folder', nfGdFolderId); }catch(_){}
+  }
+  /* ★ 폴더 자체를 '링크 있는 누구나 보기'로 공개 → 폴더 안 모든 파일(앞으로 올릴 것 포함)이 로그인 없이 열림. 세션당 1번만 시도(캐시된 폴더에도 적용) */
+  if(nfGdFolderId && !_gdFolderPub){ _gdFolderPub=true; try{ await nfGdSetPublic(nfGdFolderId, token); }catch(_){} }
   return nfGdFolderId;
 }
 async function nfGdUpload(file, reviewId){
