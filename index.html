@@ -1207,6 +1207,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <span id="shareStatus" class="share-badge">○ 팀 공유 꺼짐</span>
     <button class="btn btn-ghost" id="shareBtn" onclick="openShare()" title="팀원과 실시간으로 검토방을 공유합니다">🔗 팀 공유</button>
     <button class="btn btn-ghost" id="gdMigBtn" onclick="nfGdMigrateAll()" title="기존 첨부를 구글 드라이브로 옮기고, 모든 드라이브 파일을 '링크 있는 사람 누구나 보기'로 공개 → 팀원 누구나 로그인 없이 다운로드">📦 드라이브 이관·공개</button>
+    <button class="btn btn-ghost" id="xlUpgBtn" onclick="nfUpgradeAllEstimates()" title="예전 버전으로 만든 내역서 엑셀에 합계 수식·갑지 글씨를 넣어 같은 자리에서 교체 (금액 변경 없음)">🔧 엑셀 최신양식</button>
     <button class="btn btn-ghost" id="xlsBtn">⬇ 현황표</button>
     <button class="btn btn-primary" id="addBtn">＋ 새 현장</button>
   </div>
@@ -6845,6 +6846,88 @@ async function nfGdMaybeAutoConnect(){
 try{ window.nfGdConnect=nfGdConnect; }catch(_){}
 /* ===== 기존 RTDB(또는 이 PC 전용 data:) 첨부를 구글 드라이브로 한 번에 이관 =====
    드라이브 복사본이 '열리는지' 확인된 뒤에만 원본 RTDB를 지워서 1GB를 회수함. 실패한 건은 원본을 그대로 둬서 계속 열림. */
+/* ===== v7.9: 검토방 엑셀 최신양식 업데이트 — 예전 버전으로 만든 내역서에 합계 수식·갑지 글씨를 넣어 같은 자리에서 교체 =====
+   · 금액은 절대 바꾸지 않음: 수식 결과가 지금 칸의 숫자와 같을 때(±1원)만 수식으로 바꾸고, 다르면 숫자 그대로 둠
+   · 교체 전 원본 주소는 l.prevUrl 에 보관 */
+async function nfUpgradeEstimateXlsx(buf){
+  const wb=new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const need=['갑지','원가계산서','집계표','산출내역서'];
+  if(!need.every(n=>wb.getWorksheet(n))) return {skip:'내역서 양식 아님'};
+  const L={4:'D',5:'E',6:'F',7:'G',8:'H',9:'I',10:'J',11:'K',12:'L'};
+  const val=c=>{ const v=c.value; return (v&&typeof v==='object'&&('result' in v))?v.result:v; };
+  const isF=c=>!!(c.value&&typeof c.value==='object'&&c.value.formula);
+  const num=(ws,r,c)=>{ const v=val(ws.getCell(r,c)); return typeof v==='number'?v:null; };
+  const lab=(ws,r)=>String(val(ws.getCell(r,1))||'').replace(/\s+/g,'');
+  let added=0, kept=0;
+  const setF=(ws,r,c,f,expect)=>{ const cell=ws.getCell(r,c); if(isF(cell)) return; const v=val(cell); if(typeof v!=='number') return;
+    if(expect!=null && Math.abs(expect-v)>1){ kept++; return; } cell.value={formula:f,result:v}; added++; };
+  const sumCol=(ws,c,a,b)=>{ let s=0; for(let r=a;r<=b;r++){ const v=num(ws,r,c); if(v!=null) s+=v; } return s; };
+  const det=wb.getWorksheet('산출내역서'), agg=wb.getWorksheet('집계표'), cost=wb.getWorksheet('원가계산서');
+  if(isF(det.getCell(5,6))||isF(det.getCell(5,12))||Array.from({length:det.rowCount},(_,i)=>i+1).some(r=>lab(det,r)==='소계'&&isF(det.getCell(r,12)))) {
+    /* 이미 수식이 있는 최신 파일 — 갑지만 확인 */
+  }
+  const subRows={};
+  ['산출내역서','일위대가표'].forEach(name=>{ const ws=wb.getWorksheet(name); if(!ws) return; let top=null, total=null; const subs=[];
+    for(let r=4;r<=ws.rowCount;r++){ const a=lab(ws,r);
+      if(/^\d+\./.test(a)){ top=r+1; continue; }
+      if(a==='소계'){ if(top!=null&&r-1>=top) [6,8,10,12].forEach(c=>setF(ws,r,c,'SUM('+L[c]+top+':'+L[c]+(r-1)+')',sumCol(ws,c,top,r-1))); subs.push(r); top=null; continue; }
+      if(a==='합계'){ total=r; continue; }
+      if(top!=null && name==='산출내역서' && num(ws,r,4)!=null){ const q=num(ws,r,4);
+        [6,8,10].forEach(c=>{ const u=num(ws,r,c-1); if(u!=null) setF(ws,r,c,'D'+r+'*'+L[c-1]+r,q*u); });
+        const k=num(ws,r,11); if(k!=null) setF(ws,r,12,'D'+r+'*K'+r,q*k); }
+    }
+    if(total&&subs.length) [6,8,10,12].forEach(c=>setF(ws,total,c,subs.map(s=>L[c]+s).join('+'),subs.reduce((s,rr)=>s+(num(ws,rr,c)||0),0)));
+    subRows[name]=subs; });
+  const ds=subRows['산출내역서']||[]; let k=0, first=null, last=null, sumRow=null;
+  for(let r=5;r<=agg.rowCount;r++){ const a=lab(agg,r);
+    if(/^\d+\./.test(a)){ const sb=ds[k++]; if(first==null) first=r; last=r; if(sb) [6,8,10,12].forEach(c=>setF(agg,r,c,"'산출내역서'!"+L[c]+sb,num(det,sb,c))); }
+    if(a==='합계') sumRow=r; }
+  if(sumRow&&first) [6,8,10,12].forEach(c=>setF(agg,sumRow,c,'SUM('+L[c]+first+':'+L[c]+last+')',sumCol(agg,c,first,last)));
+  if(sumRow && lab(cost,28).indexOf('총공사비')>=0){
+    const D=r=>num(cost,r,4)||0;
+    setF(cost,6,4,"'집계표'!F"+sumRow,num(agg,sumRow,6)); setF(cost,9,4,"'집계표'!H"+sumRow,num(agg,sumRow,8)); setF(cost,12,4,"'집계표'!J"+sumRow,num(agg,sumRow,10));
+    setF(cost,8,4,'D6+D7',D(6)+D(7)); setF(cost,11,4,'D9+D10',D(9)+D(10)); setF(cost,22,4,'D12+SUM(D13:D21)',[12,13,14,15,16,17,18,19,20,21].reduce((s,r)=>s+D(r),0));
+    setF(cost,23,4,'D8+D11+D22',D(8)+D(11)+D(22)); setF(cost,26,4,'D23+D24+D25',D(23)+D(24)+D(25));
+    const unit=(typeof RATES!=='undefined'&&RATES.roundUnit)||100000;
+    setF(cost,27,4,'-MOD(D26,'+unit+')',-(D(26)%unit)); setF(cost,28,4,'D26+D27',D(26)+D(27));
+    const cov=wb.getWorksheet('안내사항'); if(cov) setF(cov,10,4,"'원가계산서'!D28",D(28));
+  }
+  const q=wb.getWorksheet('물량산출내역서');
+  if(q) q.eachRow((row,r)=>row.eachCell((cell,c)=>{ if(String(val(cell)).trim()!=='합계') return; const vc=q.getCell(r,c+1); if(isF(vc)||typeof vc.value!=='number') return;
+    let t=r-1; while(t>1 && typeof val(q.getCell(t,c+1))==='number') t--; if(r-1>t){ const Lc=q.getColumn(c+1).letter; setF(q,r,c+1,'SUM('+Lc+(t+1)+':'+Lc+(r-1)+')',sumCol(q,c+1,t+1,r-1)); } }));
+  /* 갑지 — 글씨 있는 표지로 교체 */
+  let cover=false;
+  try{ const gap=wb.getWorksheet('갑지'); const imgs=gap.getImages(); if(imgs.length && typeof POUR_COVER_B64==='string'){ const m=wb.getImage(imgs[0].imageId);
+      const nb=nfB64ToBuf(POUR_COVER_B64); const same=m && m.buffer && m.buffer.byteLength===nb.byteLength;
+      if(m && !same){ m.buffer=(typeof Buffer!=='undefined')?Buffer.from(nb):new Uint8Array(nb); delete m.base64; delete m.filename; m.extension='jpeg'; cover=true; } } }catch(e){ console.warn('[갑지 교체]',e); }
+  if(!added && !cover) return {skip:'이미 최신', kept};
+  wb.subject=(typeof NF_XL_VER!=='undefined')?NF_XL_VER:'v7.9';
+  const out=await wb.xlsx.writeBuffer();
+  return {buf:out, added, kept, cover};
+}
+async function nfUpgradeAllEstimates(){
+  if(typeof ExcelJS==='undefined'){ toast('엑셀 라이브러리 로딩 중 — 잠시 후 다시 눌러주세요'); return; }
+  const jobs=[];
+  (reviews||[]).forEach(r=>{ (r.comments||[]).forEach(c=>{ (c.links||[]).forEach(l=>{ if(l && l.url && /\.xlsx$/i.test(l.name||'') && !l.upgraded) jobs.push({r,c,l}); }); }); });
+  if(!jobs.length){ toast('업데이트할 엑셀이 없어요 ✓'); return; }
+  if(!confirm('검토방에 올라간 내역서 엑셀 '+jobs.length+'개를 확인해서, 예전 버전 파일에 합계 수식과 갑지 글씨를 넣고 같은 자리에서 교체합니다.\n· 금액은 바뀌지 않습니다 (숫자가 다른 칸은 그대로 둠)\n· 원본 주소는 따로 보관됩니다\n끝날 때까지 창을 닫지 마세요.')) return;
+  let done=0, skip=0, fail=0, kept=0;
+  for(let i=0;i<jobs.length;i++){ const {r,l}=jobs[i];
+    toast('🔧 엑셀 업데이트 중… '+(i+1)+'/'+jobs.length+' '+(r.site||''));
+    try{
+      const buf=await nfFileBytes(l); const res=await nfUpgradeEstimateXlsx(buf);
+      if(!res.buf){ skip++; continue; }
+      const file=new File([res.buf], l.name, {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+      const up=await nfUploadAttachment(file, r.id);
+      const chk=await nfFileBytes(up); if(!chk || !chk.byteLength) throw new Error('verify 0 bytes');
+      l.prevUrl=l.url; l.url=up.url; l.size=up.size; l.upgraded=(typeof NF_XL_VER!=='undefined')?NF_XL_VER:'v7.9';
+      kept+=res.kept||0; done++; await save();
+    }catch(e){ console.error('[엑셀 업데이트]', r.site, l.name, e); fail++; }
+  }
+  render();
+  alert('엑셀 최신양식 업데이트 완료\n· 교체: '+done+'개\n· 이미 최신/내역서 아님: '+skip+'개'+(fail?('\n· 실패: '+fail+'개 (다시 누르면 재시도)'):'')+(kept?('\n· 숫자가 달라 수식 대신 숫자로 둔 칸: '+kept+'개'):''));
+}
+window.nfUpgradeAllEstimates=nfUpgradeAllEstimates; window.nfUpgradeEstimateXlsx=nfUpgradeEstimateXlsx;
 async function nfGdMigrateAll(){
   if(!nfGdOn){ const okc=await nfGdMaybeAutoConnect(); if(!okc){ toast('먼저 구글 드라이브에 연결해주세요 (📁 드라이브 연결)'); return; } }
   const jobs=[];
