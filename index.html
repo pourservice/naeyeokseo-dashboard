@@ -4875,9 +4875,10 @@ function koNum(n){
   }
   return res;
 }
+const NF_XL_VER='POUR내역서 v7.9 (갑지·합계수식 포함)';
 async function buildConsultingWorkbook(d){
   const EJS=(typeof ExcelJS!=='undefined')?ExcelJS:require('exceljs');
-  const wb=new EJS.Workbook(); wb.creator='넷폼';
+  const wb=new EJS.Workbook(); wb.creator='넷폼'; wb.subject=NF_XL_VER; wb.keywords=NF_XL_VER;   /* 파일 속성에 생성 버전 기록 — 어느 버전으로 만든 파일인지 확인용 */
   const gv=id=>{ try{ const el=document.getElementById(id); return el?(el.value||''):''; }catch(e){ return ''; } };
   const projectName=gv('project'), clientName=gv('client'), special=gv('special');
   const now=new Date(), dateStr=now.getFullYear()+'. '+(now.getMonth()+1)+'. '+now.getDate()+'.';
@@ -5250,8 +5251,10 @@ async function buildConsultingWorkbook(d){
     const top=RR;
     qsheet.mergeCells(RR,RC0,RR,RC0+1); const h=qsheet.getCell(RR,RC0); h.value=col.label; h.font={name:FONT,bold:true,size:11,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+1,'FFEAF3F0'); qsheet.getRow(RR).height=20; RR++;
     const d1=qsheet.getCell(RR,RC0); d1.value='동'; const d2=qsheet.getCell(RR,RC0+1); d2.value='물량(㎡)'; [d1,d2].forEach(cc=>{ cc.font={name:FONT,bold:true,size:10}; cc.alignment={horizontal:'center',vertical:'middle'}; }); fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=19; RR++;
+    const rTop=RR;
     EBq.forEach(b=>{ const nc=qsheet.getCell(RR,RC0); nc.value=b.name; nc.alignment={horizontal:'center',vertical:'middle'}; nc.font={name:FONT,size:10}; const vc=qsheet.getCell(RR,RC0+1); vc.value=col.get(b); vc.numFmt=FMT_Q3; vc.alignment={horizontal:'right',vertical:'middle'}; vc.font={name:FONT,size:10}; qsheet.getRow(RR).height=18; RR++; });
-    const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'}; const tv=qsheet.getCell(RR,RC0+1); tv.value=EBq.reduce((s,b)=>s+col.get(b),0); tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=20;
+    const rBot=RR-1, rL=colLetter(RC0+1), rSum=EBq.reduce((s,b)=>s+col.get(b),0);
+    const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'}; const tv=qsheet.getCell(RR,RC0+1); tv.value=(rBot>=rTop)?{formula:'SUM('+rL+rTop+':'+rL+rBot+')', result:rSum}:rSum;   /* v7.9: 산출근거 합계도 SUM 수식 */ tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=20;
     frame(qsheet,top,RC0,RR,RC0+1); RR+=2;
   });
   R=Math.max(leftBottom, RR)+1;
@@ -7050,7 +7053,7 @@ window.NF_DASH = {
       rates:(Array.isArray(data.rates)&&data.rates.length)?data.rates:null,
       due:data.due||'', amt:data.amt||'', rev:'', status:'draft', notes:data.notes||data.memo||'', checks:{draft:{},final:{}},
       comments:[{ id:'c'+Date.now()+rand(), author:'내역서 자동화', ts:now,
-        text:'자동화에서 등록된 내역서입니다.'+(data.amt?(' '+data.amt):''),
+        text:'자동화에서 등록된 내역서입니다.'+(data.amt?(' '+data.amt):'')+(typeof NF_XL_VER!=='undefined'?(' ['+NF_XL_VER+']'):''),
         links: data.fileDataUrl?[{name:data.fileName||'내역서.xlsx', url:data.fileDataUrl}]:[] }] };
     reviews.unshift(rev);
     await save(); render(); toast('검토방(초안 검토)에 등록되었습니다'); openDetail(rev);
