@@ -5763,7 +5763,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-06-sync42';
+const APP_VER='2026-10-06-sync43';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6648,7 +6648,7 @@ function renderDetail(){
   (function(){ const comp=$('#detailModal') && $('#detailModal').querySelector('.composer'); if(!comp) return;
     comp.addEventListener('dragover',e=>{ e.preventDefault(); comp.style.outline='2px dashed #2a5ad3'; comp.style.outlineOffset='3px'; comp.style.background='#f1f6f9'; });
     comp.addEventListener('dragleave',e=>{ if(!comp.contains(e.relatedTarget)){ comp.style.outline=''; comp.style.background=''; } });
-    comp.addEventListener('drop',async e=>{ e.preventDefault(); comp.style.outline=''; comp.style.background=''; const fs=Array.from((e.dataTransfer&&e.dataTransfer.files)||[]); try{ await nfGdMaybeAutoConnect(); }catch(_){} for(const f of fs){ await attachCommentFile(f); } });
+    comp.addEventListener('drop',async e=>{ e.preventDefault(); comp.style.outline=''; comp.style.background=''; const fs=Array.from((e.dataTransfer&&e.dataTransfer.files)||[]); try{ if(!nfRelayUrl()) await nfGdMaybeAutoConnect(); }catch(_){} for(const f of fs){ await attachCommentFile(f); } });
   })();
   $('#cLink').onclick=()=>{const u=prompt('드라이브/공유 링크 URL:');if(u&&u.trim()){const n=prompt('표시 이름(선택):')||'';detailLinks.push({name:n.trim()||u.trim(),url:u.trim()});renderStaged();}};
   $('#cPost').onclick=postComment;
@@ -6719,6 +6719,7 @@ function exportExcel(){
 }
 
 const MAX_ATTACH=50*1048576;   /* 댓글 첨부 최대 50MB */
+const NF_RELAY_MAX=22*1048576;  /* 중계 서버(GAS) 업로드 최대 — 이 이하는 로그인 없이 중계로 올림, 초과면 드라이브 직접(로그인) */
 function nfReadDataUrl(file){ return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(fr.error);fr.readAsDataURL(file);}); }
 /* ===== 첨부파일을 Realtime Database에 저장(무료·카드 불필요). 큰 파일은 1MB씩 쪼개서 안정적으로 올림 ===== */
 async function nfRtdbUpload(file, reviewId){
@@ -6802,6 +6803,20 @@ async function nfGdFindByName(name, token){
 }
 /* 공개 파일용 URL — 로그인 불필요 */
 function nfGdDownloadUrl(id){ return 'https://drive.google.com/uc?export=download&id='+id; }
+/* ★ 중계 서버(GAS)로 업로드 — 올리는 사람도 로그인 불필요.
+   GAS가 poursolution22 권한으로 드라이브에 저장하고 '링크 있는 사람 누구나 보기'로 공개 → gdrive:ID 반환(다운로드는 기존처럼 API키로) */
+async function nfRelayUpload(file, reviewId){
+  const relay=nfRelayUrl(); if(!relay) throw new Error('중계 서버 주소 없음');
+  if(file.size>NF_RELAY_MAX) throw new Error('중계 업로드 용량초과');
+  const dataUrl=await nfReadDataUrl(file);
+  const b64=dataUrl.slice(dataUrl.indexOf(',')+1);
+  const payload={ upload:{ name:file.name||'file', mime:file.type||nfMimeFromName(file.name), b64:b64, folder:NF_GD_FOLDER_NAME } };
+  const r=await fetch(relay, {method:'POST', body:JSON.stringify(payload)});   /* 본문 문자열 → text/plain(단순요청) : CORS 프리플라이트 없음 */
+  if(!r.ok) throw new Error('중계 업로드 실패 '+r.status);
+  let j; try{ j=await r.json(); }catch(_){ throw new Error('중계 응답 파싱 실패'); }
+  if(!j||!j.ok||!j.id) throw new Error('중계 응답 오류 '+((j&&j.error)||''));
+  return 'gdrive:'+j.id;
+}
 function nfGdViewUrl(id){ return 'https://drive.google.com/file/d/'+id+'/view'; }
 function nfGdPreviewUrl(id){ return 'https://drive.google.com/file/d/'+id+'/preview'; }
 async function nfGdFetchBytes(id){
@@ -6879,6 +6894,14 @@ try{ if(nfGdOn){ setTimeout(function(){ try{nfGdUpdateBtn();}catch(_){} }, 800);
 async function attachCommentFile(file){
   if(!file) return;
   if(file.size>MAX_ATTACH){ toast(file.name+' ('+(file.size/1048576).toFixed(1)+'MB): 최대 '+Math.round(MAX_ATTACH/1048576)+'MB까지 첨부할 수 있어요'); return; }
+  /* ★ 1순위: 중계 서버로 업로드 — 로그인 불필요 (22MB 이하) */
+  if(nfRelayUrl() && file.size<=NF_RELAY_MAX){
+    toast('⬆ '+file.name+' 올리는 중…');
+    try{ const key=await nfRelayUpload(file, currentDetailId); detailLinks.push({name:file.name, url:key, size:file.size}); renderStaged(); toast('✓ '+file.name+' 첨부됨'); return; }
+    catch(e){ console.error('[attach relay]',e); /* 실패 시 아래 경로로 자동 대체 */ }
+  }
+  /* 대용량(>22MB)이거나 중계 실패 시에만 드라이브 직접 — 이때만 로그인 필요 */
+  if(!nfGdOn){ try{ await nfGdMaybeAutoConnect(); }catch(_){} }
   /* 구글 드라이브 연결돼 있으면 우선 드라이브로(용량 걱정 없음) — 실패하면 아래 RTDB로 자동 대체 */
   if(nfGdOn){
     toast('⬆ '+file.name+' 드라이브에 올리는 중…');
@@ -6901,7 +6924,7 @@ async function attachCommentFile(file){
   if(file.size<=MAX_EMBED){ try{ const d=await nfReadDataUrl(file); detailLinks.push({name:file.name,url:d}); renderStaged(); toast('첨부됨'); }catch(_){ toast('첨부 실패'); } }
   else{ toast('큰 파일은 팀 공유 연결 후 첨부 가능합니다'); }
 }
-$('#hiddenFile').onchange=async function(){ const files=Array.from(this.files||[]); this.value=''; try{ await nfGdMaybeAutoConnect(); }catch(_){} for(const f of files){ await attachCommentFile(f); } };
+$('#hiddenFile').onchange=async function(){ const files=Array.from(this.files||[]); this.value=''; try{ if(!nfRelayUrl()) await nfGdMaybeAutoConnect(); }catch(_){} for(const f of files){ await attachCommentFile(f); } };
 
 /* ---------- add / edit ---------- */
 function fillStageSelect(){$('#f_status').innerHTML=STAGES.map(s=>`<option value="${s.key}">${s.label}</option>`).join('');}
@@ -6953,6 +6976,10 @@ function openModal(r){
 function closeModal(){overlay.classList.remove('show');}
 /* 공용 첨부 업로드 — 드라이브 연결되면 드라이브, 아니면 공유DB(RTDB), 둘 다 안 되면 작은 파일만 이 PC 인라인 */
 async function nfUploadAttachment(file, reviewId){
+  /* 1순위: 중계 서버로 업로드 — 로그인 불필요 (22MB 이하) */
+  if(nfRelayUrl() && file.size<=NF_RELAY_MAX){ try{ return {name:file.name, url:await nfRelayUpload(file, reviewId), size:file.size}; }catch(e){ console.error('[att relay]',e); } }
+  /* 대용량(>22MB)이거나 중계 실패 시에만 드라이브 직접 — 이때만 로그인 필요 */
+  if(!nfGdOn){ try{ await nfGdMaybeAutoConnect(); }catch(_){} }
   if(nfGdOn){ try{ return {name:file.name, url:await nfGdUpload(file, reviewId), size:file.size}; }catch(e){ console.error('[att gdrive]',e); } }
   if(nfCloud.on && nfCloud.rtdb){ return {name:file.name, url:await nfRtdbUpload(file, reviewId), size:file.size}; }
   if(file.size<=MAX_EMBED){ return {name:file.name, url:await nfReadDataUrl(file), size:file.size}; }
@@ -6961,7 +6988,7 @@ async function nfUploadAttachment(file, reviewId){
 async function collectModalFiles(){
   const links=[];
   const hasFile=['f_xls','f_cad'].some(id=>{ const inp=$('#'+id); return inp&&inp.files&&inp.files[0]; });
-  if(hasFile){ try{ await nfGdMaybeAutoConnect(); }catch(_){} }
+  if(hasFile){ try{ if(!nfRelayUrl()) await nfGdMaybeAutoConnect(); }catch(_){} }
   for(const id of ['f_xls','f_cad']){
     const inp=$('#'+id); const f=inp&&inp.files&&inp.files[0];
     if(!f) continue;
