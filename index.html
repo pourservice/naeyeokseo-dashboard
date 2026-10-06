@@ -1231,6 +1231,11 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
       <div class="field"><label>공종</label><input id="f_gong" placeholder="예) POUR 슬라브"></div>
     </div>
     <div class="field-row">
+      <div class="field"><label>주소</label><input id="f_addr" placeholder="예) 서울 성동구 독서당로 272"></div>
+      <div class="field"><label>최종금액</label><input id="f_final" placeholder="예) 55,700,000원"></div>
+    </div>
+    <div class="field"><label>공사범위 <span class="hint">(구글시트 기록용 — 비우면 특이사항에서 자동 추출)</span></label><input id="f_scope" placeholder="예) 일부동(3개동) 슬라브 옥상 방수공사_옥탑 포함"></div>
+    <div class="field-row">
       <div class="field"><label>마감기한</label><input id="f_due" type="date"></div>
       <div class="field"><label>금액 (선택)</label><input id="f_amt" placeholder="예) 슬라브 ㎡당 30,000원"></div>
     </div>
@@ -5652,7 +5657,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync35';
+const APP_VER='2026-10-06-sync36';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6009,9 +6014,14 @@ async function sheetLog(r, stageLabel){
   if(sp>0){ company=reqTxt.slice(0,sp); manager=reqTxt.slice(sp+1).trim(); }
   const d=new Date(),p=x=>String(x).padStart(2,'0');
   const dateStr=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
-  const notes=(r.notes||'').split(/\n+/).map(s=>s.replace(/^[-·•]\s*/,'').trim()).filter(Boolean).join(' / ');
-  const scope=r.scope||r.proj||'';       /* 공사 범위 */
-  const row=[stageLabel, r.site||'', company, manager, r.addr||'', scope, dateStr, r.finalAmt||'', notes];
+  /* 특이사항(메모)에서 '주소:' '범위:' 등 라벨값 추출 — 대시보드에 직접 적은 카드도 칸을 채우기 위함 */
+  const nfGrabNote=(raw,labels)=>{ const parts=String(raw||'').split(/\n+|\s*\/\s*/).map(s=>s.replace(/^[-·•#]\s*/,'').trim()).filter(Boolean); for(const lab of labels){ for(const p of parts){ const m=p.match(new RegExp('^'+lab+'\\s*[:：]\\s*(.+)$')); if(m) return m[1].trim(); } } return ''; };
+  const raw=r.notes||'';
+  const addrV = (r.addr||'').trim() || nfGrabNote(raw,['주소']);
+  const gongV = (r.scope||'').trim() || (r.gong||'').trim();                         /* F 공종(공법요약/공종) */
+  const finalV = (r.finalAmt||'').trim() || nfGrabNote(raw,['최종금액','공사금액','총공사비']) || (r.amt||'').trim();
+  const scopeV = nfGrabNote(raw,['공사범위','공사 범위','범위']) || (r.scope||r.proj||'').trim();   /* I 특이사항 = 공사범위만 */
+  const row=[stageLabel, r.site||'', company, manager, addrV, gongV, dateStr, finalV, scopeV];
   try{
     await fetch(relay,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({sheetLog:{row}})});
     return true;
@@ -6757,6 +6767,9 @@ function openModal(r){
   if($('#f_paste'))$('#f_paste').value='';
   $('#f_site').value=r?r.site:'';$('#f_req').value=r?r.req:'';$('#f_gong').value=r?r.gong:'';
   $('#f_due').value=r?r.due:'';$('#f_amt').value=r?r.amt:'';$('#f_rev').value=r?r.rev:'';
+  if($('#f_addr'))$('#f_addr').value=r?(r.addr||''):'';
+  if($('#f_final'))$('#f_final').value=r?(r.finalAmt||''):'';
+  if($('#f_scope'))$('#f_scope').value=r?(r.scope||r.proj||''):'';
   $('#f_status').value=r?r.status:'draft';$('#f_notes').value=r?r.notes:'';
   if($('#f_xls'))$('#f_xls').value='';if($('#f_cad'))$('#f_cad').value='';if($('#f_links'))$('#f_links').value='';
   $('#delBtn').style.display=r?'inline-block':'none';
@@ -6787,12 +6800,15 @@ async function collectModalFiles(){
 async function saveForm(){
   const id=$('#f_id').value;
   const data={site:$('#f_site').value.trim(),req:$('#f_req').value.trim(),gong:$('#f_gong').value.trim(),
+    addr:($('#f_addr')?$('#f_addr').value.trim():''), finalAmt:($('#f_final')?$('#f_final').value.trim():''), scope:($('#f_scope')?$('#f_scope').value.trim():''),
     due:$('#f_due').value,amt:$('#f_amt').value.trim(),rev:$('#f_rev').value.trim(),status:$('#f_status').value,notes:$('#f_notes').value.trim()};
   if(!data.site){toast('현장명을 입력하세요');return;}
   const atts=await collectModalFiles();
   const attComment = atts.length ? {id:'c'+Date.now()+rand(),author:'등록',ts:new Date().toISOString(),text:'현장 등록 시 첨부',links:atts} : null;
-  if(id){ const R=reviews.find(r=>r.id===id); Object.assign(R,data); if(attComment){ R.comments=R.comments||[]; R.comments.push(attComment); } }
-  else { data.id='r'+Date.now()+rand(); data.comments=attComment?[attComment]:[]; data.checks={draft:{},final:{}}; reviews.unshift(data); }
+  let card;
+  if(id){ const R=reviews.find(r=>r.id===id); Object.assign(R,data); if(attComment){ R.comments=R.comments||[]; R.comments.push(attComment); } card=R; }
+  else { data.id='r'+Date.now()+rand(); data.comments=attComment?[attComment]:[]; data.checks={draft:{},final:{}}; reviews.unshift(data); card=data; }
+  try{ await maybeSheetLog(card, card.status); }catch(_){}   /* ★ 완료 단계로 등록/수정해도 구글시트에 기록(직접 올린 카드 누락 방지) */
   await save(); closeModal(); render();
 }
 async function delForm(){
