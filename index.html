@@ -5652,7 +5652,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-02-sync34';
+const APP_VER='2026-10-02-sync35';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6237,9 +6237,9 @@ function nfPreserveLocalFiles(oldR, newR){
 function nfDownloadFile(f){
   if(!f || !f.url){ toast('이 파일은 아직 이 컴퓨터에 없어요. (원본을 올린 컴퓨터에서 받아주세요)'); return; }
   const url0=String(f.url);
-  if(url0.indexOf('gdrive:')===0){   /* Google Drive 공개 파일 → 로그인 없이 공개 링크로 바로 다운로드 */
-    const id=url0.slice(7);
-    const a=document.createElement('a'); a.href=nfGdDownloadUrl(id); a.target='_blank'; a.rel='noopener'; document.body.appendChild(a); a.click(); a.remove();
+  if(url0.indexOf('gdrive:')===0){   /* Google Drive 공개 파일 → 프로젝트 키로 받아서 저장(구글 로그인 전혀 안 거침) */
+    toast('⬇ 다운로드 준비 중…');
+    nfGdFetchBytes(url0.slice(7)).then(buf=>{ const blob=new Blob([buf],{type:nfMimeFromName(f.name)}); const bu=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=bu; a.download=f.name||'파일'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(bu),5000); }).catch(e=>{ console.error('[dl gdrive]',e); toast('다운로드 실패 — 잠시 후 다시 시도'); });
     return;
   }
   if(url0.indexOf('rtdb:')===0){   /* Realtime Database 파일 → 받아서 저장 */
@@ -6556,6 +6556,7 @@ async function nfRtdbFetch(fileId){
 /* ===================== Google Drive 저장 (무료 15GB · 팀 계정 poursolution22 공용) =====================
    기존 RTDB는 그대로 두고, 드라이브를 '추가'로 붙임. 드라이브 연결돼 있으면 새 첨부는 드라이브로, 아니면 기존 RTDB로. */
 const NF_GD_CLIENT_ID='506488368717-as9lbpidc59t59pjojmsg55l1042hvbg.apps.googleusercontent.com';
+const NF_GD_API_KEY='AIzaSyDH5jFBm6-ceVQhM1_RHhMckPNbltI3wcc';   /* 공개 파일 직접 다운로드용(구글 로그인 불필요) — 프로젝트에 Drive API 사용설정 필요 */
 const NF_GD_SCOPE='https://www.googleapis.com/auth/drive.file';
 const NF_GD_FOLDER_NAME='POUR 내역서 첨부';
 let nfGdOn=false, _gdTok=null, _gdExp=0, _gdTC=null, _gdPending=null, nfGdFolderId=null, _gdFolderPub=false;
@@ -6615,10 +6616,13 @@ async function nfGdFindByName(name, token){
   return (j.files&&j.files.length)?j.files[0].id:null;
 }
 /* 공개 파일용 URL — 로그인 불필요 */
-function nfGdDownloadUrl(id){ return 'https://drive.usercontent.google.com/download?id='+id+'&export=download&confirm=t'; }
+function nfGdDownloadUrl(id){ return 'https://drive.google.com/uc?export=download&id='+id; }
 function nfGdViewUrl(id){ return 'https://drive.google.com/file/d/'+id+'/view'; }
 function nfGdPreviewUrl(id){ return 'https://drive.google.com/file/d/'+id+'/preview'; }
 async function nfGdFetchBytes(id){
+  /* 1순위: 프로젝트 키로 공개 파일 직접 받기 — 구글 로그인 전혀 불필요(어떤 계정이든/로그아웃이든 전원 OK) */
+  try{ const rk=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?alt=media&key='+NF_GD_API_KEY); if(rk.ok) return await rk.arrayBuffer(); }catch(_){}
+  /* 폴백: 업로더 OAuth 토큰(연결돼 있을 때만) */
   const token=await nfGdGetToken(false);
   const r=await nfGdApi('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?alt=media', {headers:{Authorization:'Bearer '+token}});
   if(!r.ok) throw new Error('드라이브 다운로드 실패 '+r.status);
