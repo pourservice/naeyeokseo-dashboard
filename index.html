@@ -1716,6 +1716,11 @@ function dongTokens(name){
   if(name==null) return [];
   let s=String(name).trim(); if(!s) return [];
   const parts=s.split(/[,，\/·]+/).map(x=>x.trim()).filter(Boolean);
+  /* v7.9: 쪼갠 조각이 전부 '동 번호'(101 · 101동 · 101~103동)일 때만 여러 동으로 봄.
+     '101동 1,2라인 옥상/1,2라인 옥탑' 같은 부분공사 이름은 쉼표·슬래시가 있어도 한 동(한 줄)으로 계산 */
+  const isDongPart=x=>/^([A-Za-z]|\d+|[A-Za-z]\d+|\d+[A-Za-z])\s*동?$/.test(x) || /^\d+\s*[~\-]\s*\d+\s*동?$/.test(x);
+  if(parts.length>1 && !parts.every(isDongPart)) return [s];
+  if(parts.length===1 && !isDongPart(parts[0])) return [s];
   const out=[];
   parts.forEach(part=>{
     const m=part.match(/^(\d+)\s*[~\-]\s*(\d+)\s*(동?)$/);
@@ -6977,9 +6982,66 @@ try{ window.nfGdMigrateAll=nfGdMigrateAll; }catch(_){}
 /* ★ 진입/새로고침만으로는 구글 로그인 안 함 — 세션에 유효 토큰이 있으면 '연결됨' 표시만, 없으면 파일 올리거나 열 때 1회만 연결 */
 try{ if(nfGdOn){ setTimeout(function(){ try{nfGdUpdateBtn();}catch(_){} }, 800); } }catch(_){}
 
+/* ===== v7.9: 큰 엑셀 자동 압축 — 엑셀 안의 큰 사진만 줄여서(긴 변 1600px·JPEG) 용량을 낮춤. 표·수식·글자는 그대로 =====
+   22MB 넘는 .xlsx/.xlsm 첨부 시 자동 실행 → 대부분 50MB 제한 안으로 들어오고, 22MB 이하면 로그인 없이 바로 올라감 */
+let __nfJSZip=null;
+function nfLoadJSZip(){ if(window.JSZip) return Promise.resolve(window.JSZip); if(__nfJSZip) return __nfJSZip;
+  __nfJSZip=new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'; s.onload=()=>res(window.JSZip); s.onerror=()=>{ __nfJSZip=null; rej(new Error('압축 모듈 로딩 실패(인터넷 확인)')); }; document.head.appendChild(s); });
+  return __nfJSZip; }
+async function nfShrinkImageBlob(blob, maxSide, q){
+  const bmp=await createImageBitmap(blob);
+  const s=Math.min(1, maxSide/Math.max(bmp.width,bmp.height));
+  const cv=document.createElement('canvas'); cv.width=Math.max(1,Math.round(bmp.width*s)); cv.height=Math.max(1,Math.round(bmp.height*s));
+  const ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height); ctx.drawImage(bmp,0,0,cv.width,cv.height);
+  try{ bmp.close&&bmp.close(); }catch(_){}
+  return await new Promise(r=>cv.toBlob(r,'image/jpeg',q));
+}
+async function nfShrinkXlsx(file, opt){
+  opt=opt||{}; const maxSide=opt.maxSide||1600, q=opt.q||0.78, minBytes=opt.minBytes||200*1024;
+  const JSZip=await nfLoadJSZip();
+  const zip=await JSZip.loadAsync(await file.arrayBuffer());
+  const media=Object.keys(zip.files).filter(n=>/^xl\/media\/[^/]+\.(jpe?g|png|bmp|tiff?)$/i.test(n));
+  const renamed={}; let changed=0;
+  for(const n of media){
+    const data=await zip.file(n).async('uint8array'); if(data.byteLength<minBytes) continue;   /* 로고·도장 같은 작은 그림은 그대로 */
+    const ext=n.split('.').pop().toLowerCase();
+    let out; try{ out=await nfShrinkImageBlob(new Blob([data],{type:ext==='png'?'image/png':'image/jpeg'}), maxSide, q); }catch(e){ continue; }
+    if(!out || out.size>=data.byteLength) continue;
+    const buf=new Uint8Array(await out.arrayBuffer());
+    if(/jpe?g/.test(ext)){ zip.file(n,buf); }
+    else { const nn=n.replace(/\.[^.]+$/,'.jpeg'); zip.remove(n); zip.file(nn,buf); renamed[n.split('/').pop()]=nn.split('/').pop(); }
+    changed++;
+  }
+  if(!changed) return file;
+  if(Object.keys(renamed).length){
+    for(const rn of Object.keys(zip.files).filter(n=>/\.rels$/i.test(n))){
+      let x=await zip.file(rn).async('string'), x0=x;
+      Object.keys(renamed).forEach(o=>{ x=x.split('media/'+o+'"').join('media/'+renamed[o]+'"'); });
+      if(x!==x0) zip.file(rn,x);
+    }
+    let ct=await zip.file('[Content_Types].xml').async('string');
+    if(!/Extension="jpeg"/i.test(ct)) ct=ct.replace('<Types ','<Types ').replace(/(<Types[^>]*>)/,'$1<Default Extension="jpeg" ContentType="image/jpeg"/>');
+    zip.file('[Content_Types].xml',ct);
+  }
+  const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6},mimeType:file.type||'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  if(blob.size>=file.size) return file;
+  return new File([blob], file.name, {type:file.type||'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+/* 첨부 전에 호출 — 22MB 넘는 엑셀이면 사진 압축본으로 바꿔서 돌려줌 */
+async function nfMaybeShrink(file){
+  try{
+    if(!file || !/\.(xlsx|xlsm)$/i.test(file.name||'') || file.size<=NF_RELAY_MAX) return file;
+    toast('🗜 '+file.name+' ('+(file.size/1048576).toFixed(1)+'MB) — 엑셀 속 사진 줄이는 중…');
+    const out=await nfShrinkXlsx(file);
+    if(out!==file) toast('✓ 엑셀 용량 '+(file.size/1048576).toFixed(1)+'MB → '+(out.size/1048576).toFixed(1)+'MB (사진만 줄임)');
+    return out;
+  }catch(e){ console.error('[엑셀 압축]',e); return file; }
+}
+window.nfShrinkXlsx=nfShrinkXlsx; window.nfMaybeShrink=nfMaybeShrink;
 async function attachCommentFile(file){
   if(!file) return;
-  if(file.size>MAX_ATTACH){ toast(file.name+' ('+(file.size/1048576).toFixed(1)+'MB): 최대 '+Math.round(MAX_ATTACH/1048576)+'MB까지 첨부할 수 있어요'); return; }
+  file=await nfMaybeShrink(file);
+  if(file.size>MAX_ATTACH){ toast(file.name+' ('+(file.size/1048576).toFixed(1)+'MB): 최대 '+Math.round(MAX_ATTACH/1048576)+'MB까지 첨부할 수 있어요 — 사진을 줄여도 커요. 구글 드라이브에 올리고 링크를 댓글에 붙여주세요'); return; }
   /* ★ 1순위: 중계 서버로 업로드 — 로그인 불필요 (22MB 이하) */
   if(nfRelayUrl() && file.size<=NF_RELAY_MAX){
     toast('⬆ '+file.name+' 올리는 중…');
@@ -7076,8 +7138,9 @@ async function collectModalFiles(){
   const hasFile=['f_xls','f_cad'].some(id=>{ const inp=$('#'+id); return inp&&inp.files&&inp.files[0]; });
   if(hasFile){ try{ if(!nfRelayUrl()) await nfGdMaybeAutoConnect(); }catch(_){} }
   for(const id of ['f_xls','f_cad']){
-    const inp=$('#'+id); const f=inp&&inp.files&&inp.files[0];
+    const inp=$('#'+id); let f=inp&&inp.files&&inp.files[0];
     if(!f) continue;
+    f=await nfMaybeShrink(f);
     if(f.size>MAX_ATTACH){ toast(`${f.name} (${(f.size/1048576).toFixed(1)}MB): 최대 ${Math.round(MAX_ATTACH/1048576)}MB까지 첨부할 수 있어요`); continue; }
     try{ toast('⬆ '+f.name+' 올리는 중…'); links.push(await nfUploadAttachment(f, 'reg')); toast('✓ '+f.name+' 첨부됨'); }
     catch(e){ console.error('[reg attach]',e); toast(f.name+' 첨부 실패 — 드라이브 연결 또는 팀 공유 연결을 확인해주세요'); }
