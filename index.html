@@ -795,7 +795,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
       <div class="kpi" style="display:none"><div class="kpi-l"><span class="dot" style="background:var(--info)"></span>신규 요청</div><div class="kpi-v" id="kpiNew">—</div></div>
       <div class="kpi"><div class="kpi-l"><span class="dot" style="background:var(--warning)"></span>검토 진행 중</div><div class="kpi-v" id="kpiReview">0</div></div>
       <div class="kpi"><div class="kpi-l"><span class="dot" style="background:#394867"></span>보완중</div><div class="kpi-v" id="kpiFix">0</div></div>
-      <div class="kpi"><div class="kpi-l"><span class="dot" style="background:var(--teal-600)"></span>발행 완료</div><div class="kpi-v" id="kpiIssued">0</div></div>
+      <div class="kpi"><div class="kpi-l"><span class="dot" style="background:var(--teal-600)"></span>발행 완료</div><div class="kpi-v" id="kpiIssued">0</div><div id="kpiIssuedSub" style="font-size:11.5px;color:var(--text-sub);margin-top:2px;"></div></div>
     </div>
 
     <div class="home-sec-title">최근 작업 · 마감 알림</div>
@@ -4629,7 +4629,9 @@ function renderHome(){
   var active=dash.filter(function(r){return r.status==='draft'||r.status==='final';});
   var fixing=active.filter(nfRevising).length;      /* 보완중 — 완료 후 수정·재검토 */
   var reviewing=active.length-fixing;               /* 검토 진행 중 — 최초 검토 */
-  var issued=hist.length;
+  /* v7.9: 발행 완료 = 검토 대시보드의 초안본 완료 + 최종본 완료 카드 수 (내역서 발행이력 아님) */
+  var issuedDraft=dash.filter(function(r){return r.status==='draftSent';}).length, issuedFinal=dash.filter(function(r){return r.status==='done';}).length;
+  var issued=issuedDraft+issuedFinal;
   var soon=0;
   dash.forEach(function(r){ if(r.status==='done')return; var dd=nfDday(r.due); if(dd!==null&&dd<=7) soon++; });
   /* 오늘 날짜 */
@@ -4643,6 +4645,8 @@ function renderHome(){
   nfSetTxt('kpiReview', nfNum(reviewing));
   var kFix=document.getElementById('kpiFix'); if(kFix){ kFix.textContent=nfNum(fixing); kFix.classList.remove('muted'); kFix.title='완료본을 수정·재검토 중인 건 (초안본/최종본 2차 등)'; }
   nfSetTxt('kpiIssued', nfNum(issued));
+  nfSetTxt('kpiIssuedSub','초안본 '+issuedDraft+' · 최종본 '+issuedFinal);
+  var kIss=document.getElementById('kpiIssued'); if(kIss) kIss.title='초안본 완료 '+issuedDraft+'건 · 최종본 완료 '+issuedFinal+'건';
   /* 최근 작업 (발행이력) */
   var rec=document.getElementById('homeRecent');
   if(rec){
@@ -6315,6 +6319,10 @@ function toggleBoardMode(){ const nx=(boardMode()==='list')?'kanban':'list'; try
 function updateModeBtn(){ const b=document.getElementById('modeBtn'); if(!b) return; b.textContent=(boardMode()==='list')?'▦ 칸반 보기':'☰ 목록 보기'; }
 window.toggleBoardMode=toggleBoardMode;
 function render(){
+  const __sc=nfScrollSnap(); const __bh=board.offsetHeight; if(__bh) board.style.minHeight=__bh+'px';   /* 다시 그리는 동안 높이 고정 → 화면이 맨 위로 튀지 않게 */
+  try{ __renderInner(); } finally { nfScrollRestore(__sc); requestAnimationFrame(()=>{ board.style.minHeight=''; }); }
+}
+function __renderInner(){
   try{ nfGdUpdateBtn(); }catch(_){}   /* 드라이브 연결 시 헤더 '이관' 버튼 표시 */
   const q=$('#search').value.trim().toLowerCase();
   const mode=boardMode();
@@ -6352,6 +6360,34 @@ function render(){
 }
 /* 화면 크기 바뀌면(직접 선택 안 했을 때만) 자동 전환 */
 window.addEventListener('resize', (function(){ let t; return function(){ clearTimeout(t); t=setTimeout(function(){ try{ if(!localStorage.getItem(BOARD_MODE_KEY) && board){ render(); } }catch(e){} }, 200); }; })());
+/* v7.9: 검토 대시보드 다시 그릴 때 스크롤 위치 유지 — 버튼·댓글·완료를 눌러도 보던 자리 그대로 */
+function nfScrollSnap(){
+  const snap={x:window.scrollX,y:window.scrollY,els:[]};
+  document.querySelectorAll('#view-dash *, #detailOverlay *').forEach(el=>{
+    if(el.scrollTop>0||el.scrollLeft>0) snap.els.push({key:nfScrollKey(el), t:el.scrollTop, l:el.scrollLeft});
+  });
+  return snap;
+}
+function nfScrollKey(el){
+  if(el.id) return '#'+el.id;
+  if(el.dataset&&el.dataset.status) return el.className+'|st='+el.dataset.status;
+  const cls=(el.className&&typeof el.className==='string')?el.className.trim():'';
+  const same=cls?Array.from(document.querySelectorAll('#view-dash .'+cls.split(/\s+/).join('.')+', #detailOverlay .'+cls.split(/\s+/).join('.'))):[];
+  return el.tagName+'.'+cls+'@'+same.indexOf(el);
+}
+function nfScrollRestore(snap){
+  if(!snap) return;
+  const apply=()=>{
+    snap.els.forEach(o=>{ let el=null;
+      try{ if(o.key[0]==='#') el=document.getElementById(o.key.slice(1));
+        else if(o.key.indexOf('|st=')>=0){ const [c,st]=o.key.split('|st='); el=Array.from(document.querySelectorAll('[data-status="'+st+'"]')).find(x=>x.className===c)||null; }
+        else { const m=o.key.match(/^([A-Z]+)\.(.*)@(-?\d+)$/); if(m&&m[2]){ const sel='.'+m[2].split(/\s+/).join('.'); el=Array.from(document.querySelectorAll('#view-dash '+sel+', #detailOverlay '+sel))[+m[3]]||null; } }
+      }catch(_){}
+      if(el){ el.scrollTop=o.t; el.scrollLeft=o.l; } });
+    window.scrollTo(snap.x,snap.y);
+  };
+  apply(); requestAnimationFrame(apply);
+}
 function cardEl(r){
   const el=document.createElement('div');
   el.className='card'; el.dataset.status=r.status; el.draggable=true; el.dataset.id=r.id;
@@ -6544,7 +6580,16 @@ function nextOf(r){
   if(i<0 || i>=STAGES.length-1) return null;
   return STAGES[i+1];
 }
-async function stepNext(r){const nx=nextOf(r);if(nx){r.status=nx.key;await maybeSheetLog(r,nx.key);await save();render();}}
+/* v7.9: 완료 단계(초안본 완료·최종본 완료)로 옮길 때 확인창 — 다른 팀원이 잘못 누르는 것 방지 */
+function nfConfirmStage(r, st){
+  if(!r || r.status===st || ['draftSent','done'].indexOf(st)<0) return true;
+  const lbl=(STAGES.find(x=>x.key===st)||{}).label||st;
+  const lf=latestFile(r);
+  return confirm('‘'+(r.site||'(현장명 없음)')+'’ 현장을\n['+lbl+'] 단계로 옮길까요?'
+    +(r.req?('\n\n요청사: '+r.req):'')+(lf&&lf.name?('\n최근 파일: '+lf.name):'')
+    +'\n\n맞으면 [확인], 아니면 [취소]를 눌러주세요.');
+}
+async function stepNext(r){const nx=nextOf(r);if(nx){if(!nfConfirmStage(r,nx.key))return;r.status=nx.key;await maybeSheetLog(r,nx.key);await save();render();}}
 function prevOf(r){
   /* 최종본 완료 → 최종본 검토 → 초안본 완료 → 초안본 검토 (잘못 눌렀을 때 이전 단계로 되돌리기) */
   const i=STAGES.findIndex(s=>s.key===r.status);
@@ -6563,7 +6608,7 @@ function wireDnD(){
     z.addEventListener('dragleave',()=>z.classList.remove('over'));
     z.addEventListener('drop',async e=>{e.preventDefault();z.classList.remove('over');
       const r=reviews.find(x=>x.id===e.dataTransfer.getData('id'));
-      if(r&&r.status!==z.dataset.status){r.status=z.dataset.status;await maybeSheetLog(r,z.dataset.status);await save();render();}});
+      if(r&&r.status!==z.dataset.status){if(!nfConfirmStage(r,z.dataset.status)){render();return;}r.status=z.dataset.status;await maybeSheetLog(r,z.dataset.status);await save();render();}});
   });
 }
 
@@ -6572,6 +6617,10 @@ let detailNotesEdit=false, editingCmtId=null;
 function openDetail(r){currentDetailId=r.id;detailLinks=[];detailNotesEdit=false;editingCmtId=null;renderDetail();detailOverlay.classList.add('show');}
 function closeDetail(){detailOverlay.classList.remove('show');currentDetailId=null;}
 function renderDetail(){
+  const __sc=nfScrollSnap();
+  try{ __renderDetailInner(); } finally { nfScrollRestore(__sc); }
+}
+function __renderDetailInner(){
   const r=reviews.find(x=>x.id===currentDetailId); if(!r)return;
   const dd=ddayInfo(r.due), cs=commentsFor(r), cur=stageOf(r);
   const stages=STAGES.map(s=>`<button class="stage-btn ${s.key===r.status?'active':''}" data-st="${s.key}">${s.label}</button>`).join('');
@@ -6678,7 +6727,7 @@ function renderDetail(){
   renderStaged();
 }
 function renderStaged(){const w=$('#staged');if(!w)return;w.innerHTML=detailLinks.map((l,i)=>`<span class="chip link">🔗 <span class="cn">${esc(l.name||l.url)}</span> <span class="x" data-rm="${i}">✕</span></span>`).join('');w.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{detailLinks.splice(+x.dataset.rm,1);renderStaged();});}
-async function setStageDetail(r,st){if(r.status!==st){r.status=st;await maybeSheetLog(r,st);renderDetail();render();await save();}}
+async function setStageDetail(r,st){if(r.status!==st){if(!nfConfirmStage(r,st))return;r.status=st;await maybeSheetLog(r,st);renderDetail();render();await save();}}
 async function postComment(){
   const r=reviews.find(x=>x.id===currentDetailId); if(!r)return;
   const author=($('#c_author').value.trim())||'(미입력)';
