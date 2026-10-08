@@ -5195,15 +5195,19 @@ async function buildConsultingWorkbook(d){
   const qsheet=wb.addWorksheet('물량산출내역서');
   qsheet.pageSetup={orientation:'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:1,horizontalCentered:true,verticalCentered:false,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.2,footer:0.2}};
   const qCols=[];
-  categories.forEach(c=>{ if(c.mode==='recipe' && activeWorks.includes(c.work)) qCols.push({label:c.label, sur:num(c.sur), get:b=>area(b,c.id), fx:b=>areaFormula(b,c.id,false)}); });
-  const anyRoofQ=buildings.some(b=>categories.some(c=>roofArea(b,c.id)>0));
-  const firstSur=qCols.length?qCols[0].sur:0;
-  if(anyRoofQ) qCols.push({label:'옥탑', sur:firstSur, get:b=>categories.reduce((s,c)=>s+roofArea(b,c.id),0), fx:b=>roofFormulaSum(b)});
-  categories.forEach(c=>{ if(c.mode==='unit') qCols.push({label:c.label, sur:num(c.sur), get:b=>area(b,c.id), fx:b=>areaFormula(b,c.id,false)}); });
+  /* v7.9: 산식 셀은 옥탑과 똑같이 괄호로 감쌈 → ((면적+둘레×계수)×배율) — 값은 동일 */
+  const enclosed=f=>{ if(!/^\(.*\)$/.test(f)) return false; let d=0; for(let i=0;i<f.length;i++){ if(f[i]==='(')d++; else if(f[i]===')'){ d--; if(d===0&&i<f.length-1) return false; } } return true; };
+  const wrapF=rf=>({f:rf.f?(enclosed(rf.f)?rf.f:('('+rf.f+')')):null, v:rf.v});
+  categories.forEach(c=>{ if(c.mode==='recipe' && activeWorks.includes(c.work)) qCols.push({label:c.label, sur:num(c.sur), get:b=>area(b,c.id), fx:b=>wrapF(areaFormula(b,c.id,false))}); });
+  /* v7.9: 옥탑은 공법별로 따로 — 공법마다 할증률이 달라서(싱글 15%·슬라브 0% 등) 한 칸에 합치면 할증이 틀림.
+     옥탑 있는 공법이 하나면 열 이름은 그대로 '옥탑' */
+  const roofCats=categories.filter(c=>((c.mode==='recipe'&&activeWorks.includes(c.work))||c.mode==='unit') && buildings.some(b=>roofArea(b,c.id)>0));
+  roofCats.forEach(c=>qCols.push({label:(roofCats.length>1?(c.label+' 옥탑'):'옥탑'), sur:num(c.sur), get:b=>roofArea(b,c.id), fx:b=>wrapF(areaFormula(b,c.id,true))}));
+  categories.forEach(c=>{ if(c.mode==='unit') qCols.push({label:c.label, sur:num(c.sur), get:b=>area(b,c.id), fx:b=>wrapF(areaFormula(b,c.id,false))}); });
   /* ★ 벽체도포 포함 시 물량산출내역서에도 한 칸 추가 (둘레 × 높이) */
   if(wallInclude && (typeof wallLedger==='function') && wallLedger()){
     const H=wallCoef();
-    qCols.push({label:'벽체도포', sur:0, get:b=>wallPerimOf(b)*H, fx:b=>{ const L=evalExpr(b.wallL), per=(L>0?L:wallAutoPerim(b)), v=per*H; return { f:(per>0?('('+_numStr(per)+'*'+_numStr(H)+')'):null), v:v }; }});
+    qCols.push({label:'벽체도포', sur:0, noRound:true, get:b=>wallPerimOf(b)*H, fx:b=>{ const L=evalExpr(b.wallL), per=(L>0?L:wallAutoPerim(b)), v=per*H; return { f:(per>0?('('+_numStr(per)+'*'+_numStr(H)+')'):null), v:v }; }});
   }
   if(!qCols.length) qCols.push({label:'물량', sur:0, get:()=>0, fx:()=>({f:null,v:0})});
   const nC=qCols.length, LC=nC+1;   /* 표 마지막 열 */
@@ -5218,7 +5222,7 @@ async function buildConsultingWorkbook(d){
   const EBq=expandedBuildings();   /* 한 칸에 여러 동 입력 시 개별 동으로 펼침 */
   /* 섹션 렌더 헬퍼 */
   const colLetter=c=>qsheet.getColumn(c).letter;
-  const baseAddr={};   /* `bi_ci` → 기본물량 셀 주소 (할증후가 수식으로 참조) */
+  const baseAddr={}, baseTotAddr={};   /* `bi_ci` → 기본물량 셀 주소 (할증후가 수식으로 참조) */
   function qtyTable(title, headerFn, kind){
     const secTop=R;
     qsheet.mergeCells(R,1,R,LC); const sb=qsheet.getCell(R,1); sb.value=title; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'left',vertical:'middle',indent:1}; fillRow(R,1,LC,'FFCFE9E3'); qsheet.getRow(R).height=22; R++;
@@ -5238,15 +5242,21 @@ async function buildConsultingWorkbook(d){
     const dataBot=R-1;
     qsheet.getCell(R,1).value='전체'; qsheet.getCell(R,1).alignment={horizontal:'center',vertical:'middle'};
     qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); const Lc=colLetter(i+2);
-      const sum=EBq.reduce((s,b)=>s+(kind==='base'?col.fx(b).v:col.fx(b).v*(1+col.sur/100)),0);
-      cell.value=(dataBot>=dataTop)?{formula:'SUM('+Lc+dataTop+':'+Lc+dataBot+')', result:sum}:sum;
+      /* v7.9: 앱(산출내역서)과 똑같이 — 기본 '전체' = ROUNDUP(합계), 할증 후 '전체' = ROUNDUP(기본 전체 × (1+할증)) */
+      const rawSum=EBq.reduce((s,b)=>s+col.fx(b).v,0);
+      let sum, f;
+      if(col.noRound){ sum=EBq.reduce((s,b)=>s+(kind==='base'?col.fx(b).v:col.fx(b).v*(1+col.sur/100)),0); f=(dataBot>=dataTop)?('SUM('+Lc+dataTop+':'+Lc+dataBot+')'):null; }
+      else if(kind==='base'){ sum=ceilUp(rawSum); f=(dataBot>=dataTop)?('ROUNDUP(SUM('+Lc+dataTop+':'+Lc+dataBot+'),0)'):null; }
+      else { sum=Math.ceil(ceilUp(rawSum)*(1+col.sur/100)); f=baseTotAddr[i]?('ROUNDUP('+baseTotAddr[i]+'*(1+'+_numStr(col.sur)+'/100),0)'):null; }
+      cell.value=f?{formula:f, result:sum}:sum;
+      if(kind==='base') baseTotAddr[i]=cell.address;
       cell.numFmt=FMT_Q2; cell.alignment={horizontal:'right',vertical:'middle'};
     });
     const totalRow=R;
     for(let c=1;c<=LC;c++) qsheet.getCell(R,c).font={name:FONT,bold:true,size:11}; fillRow(R,1,LC); qsheet.getRow(R).height=21; R++;
     qsheet.getCell(R,1).value='총물량'; qsheet.getCell(R,1).alignment={horizontal:'center',vertical:'middle'};
     const g=qsheet.getCell(R,2), firstL=colLetter(2), lastL=colLetter(LC);
-    const gtot=EBq.reduce((s,b)=>qCols.reduce((ss,col)=>ss+(kind==='base'?col.fx(b).v:col.fx(b).v*(1+col.sur/100)),s),0);
+    const gtot=qCols.reduce((ss,col,i)=>{ const v=qsheet.getCell(totalRow,i+2).value; return ss+(+((v&&typeof v==='object')?v.result:v)||0); },0);   /* = 전체 행 합 */
     g.value=(LC>=2)?{formula:'SUM('+firstL+totalRow+':'+lastL+totalRow+')', result:gtot}:gtot; g.numFmt=FMT_Q2; g.alignment={horizontal:'right',vertical:'middle'};
     for(let c=1;c<=LC;c++) qsheet.getCell(R,c).font={name:FONT,bold:true,size:11}; fillRow(R,1,LC); qsheet.getRow(R).height=21; R++;
     frame(qsheet,top,1,R-1,LC); R+=1;
@@ -6412,6 +6422,7 @@ function cardEl(r){
       ${r.req?`<div class="row"><span class="k">요청사</span><span>${esc(r.req)}</span></div>`:''}
       ${r.due?`<div class="row"><span class="k">마감</span><span class="mono">${esc(r.due)}</span></div>`:''}
       ${r.rev?`<div class="row"><span class="k">검토자</span><span>${esc(r.rev)}</span></div>`:''}
+      <div class="row"><span class="k">공사범위</span><span>${(r.scope||r.proj||'').trim()?esc((r.scope||r.proj||'').trim()):'<span style="color:var(--ink-faint)">미입력</span>'}</span></div>
     </div>
     ${(function(){ const n=(r.notes||'').trim(); if(!n) return ''; const lines=n.split(/\n+/).map(x=>x.replace(/^[-•*·]\s*/,'').trim()).filter(Boolean); if(!lines.length) return ''; return '<div class="spec-box"><div class="sb-h">특이사항</div><ul>'+lines.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul></div>'; })()}
     ${buildChecklist(r)}
@@ -6665,7 +6676,7 @@ function __renderDetailInner(){
       ${dd?`<span class="dday ${dd.cls}">${dd.txt}</span>`:''}<button class="d-close" id="dClose">×</button></div>
     <div class="d-meta">
       ${r.req?`<span><b>요청사</b> ${esc(r.req)}</span>`:''}${r.addr?`<span><b>주소</b> ${esc(r.addr)}</span>`:''}${r.due?`<span><b>마감</b> ${esc(r.due)}</span>`:''}
-      ${r.amt?`<span><b>금액</b> ${esc(r.amt)}</span>`:''}${r.finalAmt?`<span><b>최종금액</b> <span style="font-weight:600;color:var(--ink)">${esc(r.finalAmt)}</span></span>`:''}${r.rev?`<span><b>검토자</b> ${esc(r.rev)}</span>`:''}
+      ${r.amt?`<span><b>금액</b> ${esc(r.amt)}</span>`:''}${r.finalAmt?`<span><b>최종금액</b> <span style="font-weight:600;color:var(--ink)">${esc(r.finalAmt)}</span></span>`:''}${r.rev?`<span><b>검토자</b> ${esc(r.rev)}</span>`:''}<span><b>공사범위</b> ${(r.scope||r.proj||'').trim()?esc((r.scope||r.proj||'').trim()):'미입력'}</span>
       <span style="cursor:pointer;color:var(--accent)" id="dEdit">현장정보 편집 ↗</span></div>
     ${nfRateBoxHtml(r,'margin-bottom:13px;')}
     ${latestBox}
