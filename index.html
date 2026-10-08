@@ -1586,7 +1586,7 @@ function areaFormula(b, cid, isRoof){
   if(dim){
     const A=evalExpr(dim.A), L=evalExpr(dim.L), P=num(pm), M=num(ml||1);
     let expr=_numStr(A);
-    if(P!==0 && L!==0) expr='('+_numStr(A)+'+'+_numStr(L)+'*'+_numStr(P)+')';
+    if(P!==0 && L!==0) expr='('+_numStr(A)+'+('+_numStr(L)+'*'+_numStr(P)+'))';   /* v7.9: (면적+(둘레×계수)) — 둘레 부분도 괄호로 */
     if(M!==1) expr=expr+'*'+_numStr(M);
     return {f:expr, v:(A+L*P)*M};
   }
