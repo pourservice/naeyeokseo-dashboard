@@ -3083,12 +3083,17 @@ function satAreaSig(b){
   return { sig: tot>0 ? parts.join('|') : null, tot: tot/100 };
 }
 /* 도면 원면적(둘레계수·할증 적용 전) 합 — 위성 측정 footprint와 직접 비교할 값 */
+/* v7.9: 공법별 CAD 원면적 — 캐드 전체면적(A) 그대로. ×1.05·둘레 치켜올림·경사할증·뻐꾸기창 모두 제외.
+   옥탑은 옥탑 물량이 있을 때(옥탑 포함 공사)만 더함 */
+function satRawCat(b,c){
+  if(!b) return 0;
+  const d=b.dims&&b.dims[c.id]; let a=(d&&d.A!=null&&String(d.A).trim()!=='') ? evalExpr(d.A) : area(b,c.id);
+  if(roofArea(b,c.id)>0){ const rd=b.roofDims&&b.roofDims[c.id]; a += (rd&&rd.A!=null&&String(rd.A).trim()!=='') ? evalExpr(rd.A) : roofArea(b,c.id); }
+  return a;
+}
 function satRawArea(b){
   if(!b) return 0; let a=0;
-  visCats().forEach(c=>{
-    const d=b.dims&&b.dims[c.id]; a += (d&&d.A!=null&&d.A!=='') ? num(d.A) : area(b,c.id);
-    const rd=b.roofDims&&b.roofDims[c.id]; a += (rd&&rd.A!=null&&rd.A!=='') ? num(rd.A) : roofArea(b,c.id);
-  });
+  visCats().forEach(c=>{ if(areaEff(b,c.id)>0) a+=satRawCat(b,c); });
   return a;
 }
 /* 면적 동일 동끼리 그룹핑 (대표동 = 그룹 첫 동) */
@@ -3096,7 +3101,7 @@ function satGroups(){
   const groups=[], idx={};
   buildings.forEach((b,i)=>{
     const s=satAreaSig(b); if(!s.sig) return;
-    if(idx[s.sig]==null){ idx[s.sig]=groups.length; groups.push({sig:s.sig, rep:i, members:[i], tot:s.tot}); }
+    if(idx[s.sig]==null){ idx[s.sig]=groups.length; groups.push({sig:s.sig, rep:i, members:[i], tot:satRawArea(b), totEff:s.tot}); }   /* v7.9: 위성 비교 기준 = CAD 원면적(할증 전) */
     else groups[idx[s.sig]].members.push(i);
   });
   return groups;
@@ -3333,7 +3338,8 @@ function satPanel(){
     const b=buildings[g.rep];
     const others=g.members.filter(m=>m!==g.rep).map(m=>buildings[m].name||('#'+(m+1)));
     const sameBadge = others.length ? '<span class="sat-same" title="산출면적이 같아 한 그룹으로 묶었어요">같은 동 '+others.length+'개 · '+esc0(others.join(', '))+'</span>' : '';
-    const areaRows=cats.map(c=>{ const a=areaEff(b,c.id); if(a<=0) return ''; return '<span class="sat-area">'+esc0(c.label||c.id)+' <b>'+won2(a)+'</b>㎡</span>'; }).filter(Boolean).join('');
+    const areaRows=cats.map(c=>{ const e=areaEff(b,c.id); if(e<=0) return ''; const a=satRawCat(b,c); return '<span class="sat-area" title="CAD 원면적(할증 전) — 산출면적(×1.05·둘레 치켜올림 포함)은 '+won2(e)+'㎡">'+esc0(c.label||c.id)+' <b>'+won2(a)+'</b>㎡</span>'; }).filter(Boolean).join('')
+      + '<span class="sat-area" style="background:transparent;border-color:transparent;color:#8793a3;font-size:11px;">CAD 원면적 · 할증 전</span>';
     const img=crossState.sat&&crossState.sat[g.sig];
     const sigJs=g.sig.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const box = img
