@@ -438,6 +438,20 @@ input:focus,select:focus{border-color:var(--teal-500);box-shadow:0 0 0 3px rgba(
 #dash-app .card .gongjong{color:var(--teal-600);background:var(--teal-100);}
 #dash-app .checklist.all{background:var(--teal-100);border-color:#D8DEE6;}
 #dash-app .chip.link{background:var(--teal-100);border-color:#D8DEE6;}
+#dash-app .fcards{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+#dash-app .fcard{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #E3E8EF;border-radius:9px;background:#F4F6F9;text-decoration:none;color:#212A3E;max-width:440px;}
+#dash-app .fcard:hover{background:#EBEFF5;border-color:#C9D2DE;}
+#dash-app .fcard .fc-ic{flex-shrink:0;width:30px;height:34px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;background:#9BA4B5;letter-spacing:-.3px;}
+#dash-app .fcard.xls .fc-ic{background:#1E9E5A;font-size:14px;}
+#dash-app .fcard.cad .fc-ic{background:#C9D2DE;color:#394867;}
+#dash-app .fcard.pdf .fc-ic{background:#D9534F;}
+#dash-app .fcard .fc-body{min-width:0;display:flex;flex-direction:column;}
+#dash-app .fcard .fc-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#dash-app .fcard .fc-sub{font-size:11px;color:#8793a3;}
+#dash-app .fcard.latest{border-color:#E4572E;background:#FFF7F3;}
+#dash-app .fcard.latest .fc-sub b{color:#E4572E;}
+#dash-app .c-text .c-ul{margin:3px 0 3px 18px;padding:0;}
+#dash-app .c-text .c-ul li{margin:1px 0;list-style:disc;}
 #dash-app .icon-btn.del{color:#394867;border-color:#D8DEE6;}
 #dash-app .icon-btn.del:hover{color:#fff;background:#394867;border-color:#394867;}
 #dash-app .amt-bar{margin-top:9px;background:#F1F6F9;border:1px solid #D8DEE6;border-radius:8px;padding:7px 11px;font-size:14px;font-weight:700;color:#394867;display:flex;align-items:center;gap:6px;}
@@ -6452,10 +6466,46 @@ async function delReview(r){
   await save(); render();
   toast('현장 카드를 삭제했습니다.');
 }
-function latestFile(r){
+/* v7.9: 파일 종류 — 내역서(엑셀) / 캐드 */
+function nfIsXls(l){ return !!l && /\.(xlsx|xlsm|xls)$/i.test(String(l.name||l.url||'').split('?')[0]); }
+function nfIsCad(l){ return !!l && /\.(dwg|dxf)$/i.test(String(l.name||l.url||'').split('?')[0]); }
+/* 최신 위치 찾기 — 기본은 '가장 최근 엑셀(내역서)'. 엑셀이 없으면 마지막 파일.
+   (등록 때 엑셀+캐드를 같이 올리면 마지막이 캐드라서, 예전엔 캐드만 '최신'으로 보이던 문제 수정) */
+function nfLatestPos(r, test){
   const cs=commentsFor(r);
-  for(let i=cs.length-1;i>=0;i--){ const ls=cs[i].links; if(ls&&ls.length) return ls[ls.length-1]; }
+  for(let i=cs.length-1;i>=0;i--){ const ls=cs[i].links||[]; for(let j=ls.length-1;j>=0;j--){ if(!test||test(ls[j])) return {c:cs[i], j:j, l:ls[j]}; } }
   return null;
+}
+function latestFile(r){
+  const p=nfLatestPos(r,nfIsXls)||nfLatestPos(r,null);
+  return p?p.l:null;
+}
+function latestCad(r){ const p=nfLatestPos(r,nfIsCad); return p?p.l:null; }
+/* 잔디처럼 파일 카드 — 아이콘 + 파일명 (클릭 = 미리보기/다운로드) */
+function fileCard(f,isLatest){
+  const id='f'+(nfFileSeq++); nfFileReg[id]=f;
+  const nm=String(f.name||f.url||'파일'); const ext=(nm.split('?')[0].match(/\.([a-z0-9]+)$/i)||[])[1]||'';
+  const e=ext.toLowerCase(); const kind=['xlsx','xlsm','xls','csv'].indexOf(e)>=0?'xls':(['dwg','dxf'].indexOf(e)>=0?'cad':(e==='pdf'?'pdf':(['png','jpg','jpeg','gif','webp'].indexOf(e)>=0?'img':'etc')));
+  const ic={xls:'X',cad:'CAD',pdf:'PDF',img:'IMG',etc:(e||'FILE').toUpperCase().slice(0,4)}[kind];
+  const sz=(f.size>0)?((f.size/1048576)>=1?(f.size/1048576).toFixed(1)+'MB':Math.max(1,Math.round(f.size/1024))+'KB'):'';
+  return `<a class="fcard ${kind}${isLatest?' latest':''}" href="#" onclick="event.preventDefault();event.stopPropagation();nfPreviewReg('${id}')" title="${esc(nm)}"><span class="fc-ic">${ic}</span><span class="fc-body"><span class="fc-name">${esc(nm)}</span>${(sz||isLatest)?`<span class="fc-sub">${isLatest?'<b>최신 내역서</b>':''}${isLatest&&sz?' · ':''}${sz}</span>`:''}</span></a>`;
+}
+/* 댓글 본문 — '-'·'•'로 시작하는 줄은 글머리표 목록으로 (잔디처럼) */
+/* 재발송 종류 — 고르면 댓글 양식이 채워짐. 필요하면 여기 한 줄 추가로 종류를 늘릴 수 있음 */
+const NF_RESEND_TYPES=[
+  {label:'수정본 재발송',      hint:'검토 의견 반영해 수정',     title:'수정본 {n}차 재발송', lines:['수정 내용','특이사항']},
+  {label:'검토완료 재발송',    hint:'검토 끝난 파일 다시 발송',   title:'검토완료 재발송',     lines:['검토자','검토 결과','특이사항']},
+  {label:'현설 반영 수정본',   hint:'현장설명회 후 변경',        title:'현설 반영 수정본',    lines:['현설 변경 사항','수정 내용','특이사항']},
+  {label:'금액·단가 조정',     hint:'단가·금액만 조정',          title:'금액 조정 재발송',    lines:['조정 내용','조정 사유','특이사항']},
+  {label:'최종본 발송',        hint:'최종 확정본',              title:'최종본 발송',         lines:['최종 금액','변경 사항','특이사항']},
+  {label:'요청사 요청 수정',   hint:'요청사가 수정 요청',        title:'요청사 요청 수정본',  lines:['요청 내용','수정 내용','특이사항']},
+  {label:'기타 (직접 입력)',   hint:'',                         title:'재발송',              lines:['내용','특이사항']}
+];
+function nfCmtHtml(t){
+  const lines=String(t||'').split(/\n/); let out='', ul=[];
+  const flush=()=>{ if(ul.length){ out+='<ul class="c-ul">'+ul.map(x=>'<li>'+mentionize(x)+'</li>').join('')+'</ul>'; ul=[]; } };
+  lines.forEach(ln=>{ const m=ln.match(/^\s*[-•·*]\s?(.*)$/); if(m){ ul.push(m[1]); } else { flush(); out+=(ln.trim()?'<div>'+mentionize(ln)+'</div>':'<div style="height:6px"></div>'); } });
+  flush(); return out;
 }
 let nfFileReg={}, nfFileSeq=0;
 function nfDownloadReg(id){ const f=nfFileReg[id]; nfDownloadFile(f); }
@@ -6636,8 +6686,9 @@ function __renderDetailInner(){
   const dd=ddayInfo(r.due), cs=commentsFor(r), cur=stageOf(r);
   const stages=STAGES.map(s=>`<button class="stage-btn ${s.key===r.status?'active':''}" data-st="${s.key}">${s.label}</button>`).join('');
   let lfCid=null, lfIdx=-1;
-  for(let i=cs.length-1;i>=0;i--){ if(cs[i].links&&cs[i].links.length){ lfCid=cs[i].id; lfIdx=cs[i].links.length-1; break; } }
+  { const lp=nfLatestPos(r,nfIsXls)||nfLatestPos(r,null); if(lp){ lfCid=lp.c.id; lfIdx=lp.j; } }
   const lf=latestFile(r), lfC=cs.find(c=>c.id===lfCid);
+  const lcad=latestCad(r), lcadP=nfLatestPos(r,nfIsCad);
   /* 첨부 파일 이력 — 모든 댓글의 파일을 올라온 순서(1차·2차·…·최종)로 모음 */
   const allFiles=[];
   cs.forEach(c=>{ (c.links||[]).forEach((l,j)=>{ allFiles.push({l:l, author:c.author, ts:c.ts, isLatest:(c.id===lfCid && j===lfIdx)}); }); });
@@ -6652,7 +6703,7 @@ function __renderDetailInner(){
         </div>`).join('')}</div>
     </div>` : '';
   const latestBox = lf
-    ? `<div class="latest-box"><span class="lb-tag">📄 현재 최신 첨부</span>${fileAnchor(lf,'chip link latest',false)}${lfC?`<span class="lb-when">${esc(lfC.author)} · ${fmtTime(lfC.ts)}</span>`:''}</div>`
+    ? `<div class="latest-box"><span class="lb-tag">📊 최신 내역서</span>${fileAnchor(lf,'chip link latest',false)}${lfC?`<span class="lb-when">${esc(lfC.author)} · ${fmtTime(lfC.ts)}</span>`:''}</div>`+(lcad&&lcad!==lf?`<div class="latest-box" style="margin-top:-6px;"><span class="lb-tag">📐 최신 캐드</span>${fileAnchor(lcad,'chip link',false)}${lcadP?`<span class="lb-when">${esc(lcadP.c.author)} · ${fmtTime(lcadP.c.ts)}</span>`:''}</div>`:'')
     : `<div class="latest-box none">📄 아직 올린 첨부 파일이 없습니다 — 아래 댓글에서 올려주세요</div>`;
   let _lastCmtDate='';
   const thread=cs.length?cs.map(c=>{
@@ -6663,12 +6714,12 @@ function __renderDetailInner(){
     const tools=editing?'':`<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center;flex-shrink:0;"><button class="c-edit" data-edit="${c.id}" title="수정" style="border:none;background:none;color:var(--ink-faint,#9aa4b3);cursor:pointer;font-size:12px;padding:0;">✏</button><button class="c-del" data-del="${c.id}" title="삭제" style="margin-left:0;">✕</button></span>`;
     const bodyHtml=editing
       ? `<textarea id="cEditTa_${c.id}" class="c-edit-ta" style="width:100%;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--accent,#394867);border-radius:7px;background:#fff;color:var(--ink);resize:vertical;min-height:52px;line-height:1.5;margin-top:4px;">${esc(c.text||'')}</textarea><div style="margin-top:5px;display:flex;gap:6px;"><button class="mini-btn primary" data-editsave="${c.id}" style="background:var(--ink);color:var(--paper);border-color:var(--ink);">저장</button><button class="mini-btn" data-editcancel="${c.id}">취소</button></div>`
-      : (c.text?`<div class="c-text">${mentionize(c.text)}</div>`:'');
+      : (c.text?`<div class="c-text">${nfCmtHtml(c.text)}</div>`:'');
     return sep+`
     <div class="cmt">
       <div class="c-top"><span class="c-author">${esc(c.author)}</span><span class="c-time">${timeLbl}</span>${tools}</div>
       ${bodyHtml}
-      ${(c.links&&c.links.length)?`<div class="c-files">${c.links.map((l,j)=>fileAnchor(l,'chip link'+((c.id===lfCid&&j===lfIdx)?' latest':''),(c.id===lfCid&&j===lfIdx))).join('')}</div>`:''}
+      ${(c.links&&c.links.length)?`<div class="c-files fcards">${c.links.map((l,j)=>fileCard(l,(c.id===lfCid&&j===lfIdx))).join('')}</div>`:''}
     </div>`;
   }).join(''):'<div class="thread-empty">아직 댓글이 없습니다. 아래에서 첫 코멘트나 파일을 올려보세요.</div>';
   $('#detailModal').innerHTML=`
@@ -6700,6 +6751,7 @@ function __renderDetailInner(){
       <div class="staged" id="staged"></div>
       <div class="comp-tools">
         <span class="mention-menu"><button class="mini-btn" id="cTag">@ 태그</button><div class="mention-list" id="tagList"></div></span>
+        <span class="mention-menu"><button class="mini-btn" id="cRevise" title="재발송 종류를 고르면 댓글 양식이 채워지고 엑셀 선택창이 열립니다" style="font-weight:700;color:#fff;background:#394867;border-color:#394867;">📤 재발송 ▾</button><div class="mention-list" id="reviseList" style="max-height:none;">${NF_RESEND_TYPES.map((t,i)=>`<div class="mi" data-rs="${i}" style="padding:7px 12px;cursor:pointer;white-space:nowrap;font-size:12.5px;"><b>${esc(t.label)}</b><span style="color:#8793a3;font-size:11px;margin-left:6px;">${esc(t.hint)}</span></div>`).join('')}</div></span>
         <button class="mini-btn" id="cFile">📎 파일 첨부 (≤50MB · 드래그 OK)</button>
         <button class="mini-btn" id="cGDrive" onclick="nfGdConnect()" title="구글 드라이브(팀 계정)에 연결하면 첨부가 드라이브 15GB에 저장됩니다">📁 드라이브 연결</button>
         <button class="mini-btn" id="cLink">🔗 드라이브 링크</button>
@@ -6712,6 +6764,19 @@ function __renderDetailInner(){
   if($('#dNotesCancel')) $('#dNotesCancel').onclick=()=>{ detailNotesEdit=false; renderDetail(); };
   if($('#dNotesSave')) $('#dNotesSave').onclick=async()=>{ r.notes=($('#d_notes').value||'').trim(); detailNotesEdit=false; await save(); renderDetail(); render(); toast('특이사항을 저장했어요.'); };
   $('#cFile').onclick=()=>$('#hiddenFile').click();
+  /* v7.9: 재발송 — 종류(수정본·검토완료·최종본 등)를 고르면 댓글칸에 양식을 채우고 엑셀 선택창을 엶 → 올리면 이 엑셀이 최신 내역서가 됨 */
+  if($('#cRevise')) $('#cRevise').onclick=(e)=>{ e.stopPropagation(); document.querySelectorAll('.mention-list.show').forEach(x=>{ if(x.id!=='reviseList') x.classList.remove('show'); }); $('#reviseList').classList.toggle('show'); };
+  $('#detailModal').querySelectorAll('[data-rs]').forEach(it=>it.onclick=(e)=>{
+    e.stopPropagation(); $('#reviseList').classList.remove('show');
+    const t=NF_RESEND_TYPES[+it.dataset.rs]; if(!t) return;
+    const nX=commentsFor(r).reduce((s,c)=>s+(c.links||[]).filter(nfIsXls).length,0);
+    const head=t.title.replace('{n}', String(nX>0?nX:1));
+    const tpl='['+head+']\n'+t.lines.map(x=>'- '+x+': ').join('\n');
+    const ta=$('#c_text');
+    if(ta){ const cur=ta.value.trim(); ta.value=cur?(tpl+'\n'+cur):tpl; ta.focus(); const k=ta.value.indexOf(t.lines[0]+': '); if(k>=0){ const pos=k+t.lines[0].length+2; ta.setSelectionRange(pos,pos); } }
+    if(t.file!==false){ const hf=$('#hiddenFile'); if(hf){ hf.setAttribute('accept','.xlsx,.xlsm,.xls,.dwg,.dxf,.pdf,.zip'); hf.click(); setTimeout(()=>hf.removeAttribute('accept'),1500); } }
+    toast(t.file===false?'내용을 적고 [댓글 등록]을 눌러주세요':'엑셀을 고르고 내용을 적은 뒤 [댓글 등록]을 눌러주세요');
+  });
   try{ nfGdUpdateBtn(); }catch(_){}   /* 드라이브 연결 버튼 상태 표시 */
   /* 댓글칸에 파일 드래그&드롭 → 바로 첨부(스토리지 업로드) */
   (function(){ const comp=$('#detailModal') && $('#detailModal').querySelector('.composer'); if(!comp) return;
@@ -6748,8 +6813,9 @@ async function postComment(){
   r.comments.push({id:'c'+Date.now()+rand(),author,ts:new Date().toISOString(),text,links:detailLinks.slice()});
   lastAuthor=author; await store.set(AKEY,author);
   detailLinks=[];
+  const __hasXls=(r.comments[r.comments.length-1].links||[]).some(nfIsXls);
   await save(); renderDetail(); render();
-  toast('댓글이 등록되었습니다');
+  toast(__hasXls?'수정본이 등록되었습니다 — 이 엑셀이 최신 내역서로 표시됩니다':'댓글이 등록되었습니다');
   const th=$('.thread'); if(th)th.scrollTop=th.scrollHeight;
   /* ★ @팀원 태그가 있으면 잔디 검토 토픽으로 알림 발송 */
   try{
