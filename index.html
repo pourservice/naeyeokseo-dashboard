@@ -3399,6 +3399,18 @@ function satPanel(){
 function esc0(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function crossSetId(k,v){ crossState[k]=v; }
 /* ★ 현재 선택(사용)한 공법만 탭으로 — 슬라브만 잡았으면 슬라브 탭만 남음 */
+/* v7.9: 위성(평면) 비교용 'CAD 원면적' — 할증·×1.05·둘레 치켜올림·뻐꾸기창 전부 빼고, 캐드에 적힌 면적 그대로.
+   우선순위: 1차 검토 탭에 직접 넣은 CAD 면적 → 견적 산출의 캐드 면적(전체면적 A) → 직접 입력 면적.
+   옥탑은 견적에 옥탑 물량이 있을 때만(=옥탑 포함 공사) 더함 — 옥탑 제외 공사면 위성도 옥탑 빼고 재므로 같이 제외 */
+function cxRawArea(tab,i){
+  const r=cxRows(tab.id)[i]; if(r && r.A!=null && r.A!=='') return num(r.A);
+  const b=buildings[i]; if(!b) return null;
+  if(tab.cat){ const c=tab.cat; const d=b.dims&&b.dims[c.id]; if(d && String(d.A||'').trim()!=='') return evalExpr(d.A); const v=num(b.areas?b.areas[c.id]:0); return v>0?v:null; }
+  if(tab.id==='x_옥탑'){ let sum=0, any=false;
+    categories.forEach(c=>{ if(roofArea(b,c.id)>0){ any=true; const d=b.roofDims&&b.roofDims[c.id]; sum+= (d && String(d.A||'').trim()!=='') ? evalExpr(d.A) : num(b.roof?b.roof[c.id]:0); } });
+    return any?sum:null; }
+  return null;
+}
 function cxTabs(){
   const tabs=[];
   categories.forEach(c=>{
@@ -4431,10 +4443,10 @@ function crossRenderResults(){
     }).join('');
     table='<table><thead><tr><th style="width:14%">공법</th><th style="width:16%">동</th><th style="width:13%">CAD 면적</th><th style="width:13%">CAD 둘레</th><th style="width:13%">산출물량</th><th style="width:13%">내역서 물량</th><th style="width:12%">편차</th></tr></thead><tbody>'+(rows||'<tr><td colspan="7" class="empty">CAD를 올려 채우거나 견적 산출에서 동을 등록하세요.</td></tr>')+'</tbody></table>';
   } else if(cur==='__map'){
-    hint='<b>2차 검토</b> — 위성 측정면적을 <b>내역물량</b>과 <b>CAD면적</b> 양쪽에 비교합니다. 할증(경사)이 있으면 CAD면적 쪽이, 없으면 내역물량 쪽이 잘 맞습니다. 측정값은 조각을 <code>+</code>로 이어 입력할 수 있습니다 (예: 219.27+38.73+42.24).';
+    hint='<b>2차 검토</b> — 위성은 평면 면적이라 <b>CAD 원면적(할증 전)</b>과 비교하는 <b>Δ CAD</b>가 기준입니다. 경사할증·×1.05·둘레 치켜올림·뻐꾸기창은 모두 빠진 값이고, <b>옥탑 제외 공사면 옥탑도 빠집니다</b>(위성도 옥탑 빼고 측정). 내역물량(할증 후)은 참고용입니다. 측정값은 조각을 <code>+</code>로 이어 입력할 수 있습니다 (예: 219.27+38.73+42.24).';
     const rows=buildings.map((b,i)=>{
       let nt=0, at=0;
-      tabs.forEach(x=>{ const r=cxRows(x.id)[i]; const n=cxNae(x.id,i); if(n!=null)nt+=n; if(r&&r.A!=null)at+=r.A; });
+      tabs.forEach(x=>{ const n=cxNae(x.id,i); if(n!=null)nt+=n; const ra=cxRawArea(x,i); if(ra!=null)at+=ra; });
       const jv=cxEval(crossState.map[i]); const dn=crossP(jv,nt), da=crossP(jv,at);
       return '<tr><td class="t-left">'+esc0(b.name||('#'+(i+1)))+'</td><td class="t-num">'+won2(nt)+'</td><td class="t-num">'+won2(at)+'</td>'
         +'<td class="cad-in"><input type="text" value="'+esc0(crossState.map[i]||'')+'" oninput="cxSetMap('+i+',this.value)" placeholder="예: 35.17+271.98"></td>'
@@ -4444,7 +4456,7 @@ function crossRenderResults(){
       +'<div style="font-size:12.5px;font-weight:700;color:#394867;margin-bottom:6px;">📋 위성 총면적 붙여넣기 <span style="font-weight:400;color:#768194;">— 카카오/네이버 측정값을 복사해 붙여넣고 [채우기]. 동마다 줄바꿈 (예: <b>101 770.61</b> / <b>102 966.19</b>)</span></div>'
       +'<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;"><textarea id="cxMapPaste" rows="2" style="flex:1;min-width:240px;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--border,#D8DEE6);border-radius:7px;resize:vertical;" placeholder="101 770.61&#10;102 966.19"></textarea>'
       +'<button class="btn sm" onclick="cxPasteMap(document.getElementById(\'cxMapPaste\').value)">채우기</button></div></div>';
-    table=pasteBox+'<table><thead><tr><th style="width:16%">동</th><th style="width:14%">내역물량 합</th><th style="width:14%">CAD면적 합</th><th style="width:20%">위성 측정면적</th><th style="width:12%">측정 합</th><th style="width:12%">Δ 내역</th><th style="width:12%">Δ CAD</th></tr></thead><tbody>'+(rows||'<tr><td colspan="7" class="empty">동이 없습니다.</td></tr>')+'</tbody></table>';
+    table=pasteBox+'<table><thead><tr><th style="width:16%">동</th><th style="width:14%" title="경사할증·×1.05·둘레 치켜올림이 들어간 값 — 참고용">내역물량 합<br><span style="font-weight:400;font-size:10.5px;">(할증 후·참고)</span></th><th style="width:14%" title="할증·×1.05·둘레 치켜올림·뻐꾸기창 모두 뺀, 캐드에 적힌 면적 (옥탑 포함 공사일 때만 옥탑 더함)">CAD 원면적<br><span style="font-weight:400;font-size:10.5px;">(할증 전)</span></th><th style="width:20%">위성 측정면적</th><th style="width:12%">측정 합</th><th style="width:12%">Δ 내역<br><span style="font-weight:400;font-size:10.5px;">(참고)</span></th><th style="width:12%">Δ CAD<br><span style="font-weight:400;font-size:10.5px;">(기준)</span></th></tr></thead><tbody>'+(rows||'<tr><td colspan="7" class="empty">동이 없습니다.</td></tr>')+'</tbody></table>';
   } else {
     const tinfo=tabs.find(x=>x.id===cur);
     hint = (cur==='x_벽체')
