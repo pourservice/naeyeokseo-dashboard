@@ -4917,7 +4917,7 @@ function koNum(n){
   }
   return res;
 }
-const NF_XL_VER='POUR내역서 v8.0 (전 시트 수식 연결)';
+const NF_XL_VER='POUR내역서 v8.1 (전 시트 수식 연결)';
 async function buildConsultingWorkbook(d){
   const EJS=(typeof ExcelJS!=='undefined')?ExcelJS:require('exceljs');
   const wb=new EJS.Workbook(); wb.creator='넷폼'; wb.subject=NF_XL_VER; wb.keywords=NF_XL_VER;   /* 파일 속성에 생성 버전 기록 — 어느 버전으로 만든 파일인지 확인용 */
@@ -5200,6 +5200,7 @@ async function buildConsultingWorkbook(d){
     const itBot=dr-1;
     subRow(det,dr,'소      계',w.mat,w.lab,w.exp,w.sum);
     if(itBot>=itTop) [[6,w.mat],[8,w.lab],[10,w.exp],[12,w.sum]].forEach(a=>setF(det,dr,a[0],'SUM('+L_[a[0]]+itTop+':'+L_[a[0]]+itBot+')',a[1]));
+    if(itBot>=itTop) [5,7,9,11].forEach(c=>{ let sm=0; for(let rr=itTop;rr<=itBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+itTop+':'+L_[c]+itBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) */
     detSub[w.key]=dr; detSubCells.push(dr); dr++;
   });
   /* ★ 벽체도포 — 방수공법 아래 별도 공종으로 (재/노/경 나눠서, 일위대가표와 동일) */
@@ -5219,6 +5220,7 @@ async function buildConsultingWorkbook(d){
     const itBot=dr-1;
     subRow(det,dr,'소      계',w.mat,w.lab,w.exp,w.sum);
     if(itBot>=itTop) [[6,w.mat],[8,w.lab],[10,w.exp],[12,w.sum]].forEach(a=>setF(det,dr,a[0],'SUM('+L_[a[0]]+itTop+':'+L_[a[0]]+itBot+')',a[1]));
+    if(itBot>=itTop) [5,7,9,11].forEach(c=>{ let sm=0; for(let rr=itTop;rr<=itBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+itTop+':'+L_[c]+itBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) */
     detSub['wall']=dr; detSubCells.push(dr); dr++;
   }
   const etcItems=[].concat(
@@ -7143,6 +7145,9 @@ async function nfUpgradeEstimateXlsx(buf){
         setF(det,r,11,'E'+r+'+G'+r+'+I'+r, (num(det,r,5)||0)+(num(det,r,7)||0)+(num(det,r,9)||0));
         if(ls && num(det,sec.hdr,4)!=null) setF(det,r,4,'$D$'+sec.hdr, num(det,sec.hdr,4));
       });
+      /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) — 빈 칸일 때만 */
+      if(ls && sec.rows.length){ const top=sec.rows[0], bot=sec.rows[sec.rows.length-1], sr=bot+1;
+        if(lab(det,sr)==='소계') [5,7,9,11].forEach(c=>{ const cl=det.getCell(sr,c); if(cl.value!=null && cl.value!=='') return; let sm=0; for(let rr=top;rr<=bot;rr++){ sm+=(num(det,rr,c)||0); } cl.value={formula:'SUM('+L[c]+top+':'+L[c]+bot+')', result:sm}; cl.numFmt='#,##0'; cl.alignment={horizontal:'right',vertical:'middle'}; cl.font=Object.assign({},det.getCell(sr,12).font||{}); added++; }); }
     });
     /* (3) 물량산출 — 숫자만 있던 기본물량 칸 → 오른쪽 산출근거 칸 참조 / (4) 산출내역서 공종 수량 → 할증 후 '전체' 참조 */
     if(q){
@@ -7162,7 +7167,19 @@ async function nfUpgradeEstimateXlsx(buf){
           colInfo.forEach(ci=>{ const cell=q.getCell(r,ci.c); if(isF(cell)||typeof cell.value!=='number') return; const ad=rgMap[ci.label+'|'+dn]; if(!ad) return; const rv=q.getCell(ad).value; if(typeof rv==='number'&&Math.abs(rv-cell.value)<0.01){ cell.value={formula:ad, result:cell.value}; added++; } }); }
       }
       if(surHdr){ let totR=0; for(let r=surHdr+1;r<=q.rowCount;r++){ if(String(val(q.getCell(r,1))||'').trim()==='전체'){ totR=r; break; } }
-        if(totR){ colInfo.forEach(ci=>{ ci.tot=num(q,totR,ci.c); ci.addr="'물량산출내역서'!"+q.getColumn(ci.c).letter+totR; });
+        let bTotR=0; for(let r=baseHdr+1;r<=q.rowCount;r++){ if(String(val(q.getCell(r,1))||'').trim()==='전체'){ bTotR=r; break; } }
+        if(totR){ colInfo.forEach(ci=>{ ci.tot=num(q,totR,ci.c); ci.addr="'물량산출내역서'!"+q.getColumn(ci.c).letter+totR;
+            /* 예전 파일: '전체'가 단순 합계(올림 없음) → 앱(산출내역서)과 같은 ROUNDUP 방식 값을 후보로 계산 */
+            const h=String(val(q.getCell(surHdr,ci.c))||''); const m=h.match(/\(([\d.]+)\s*%\)/); ci.sur=m?+m[1]:0;
+            const bt=bTotR?num(q,bTotR,ci.c):null; ci.bAddr=bTotR?(q.getColumn(ci.c).letter+bTotR):null; ci.sAddr=q.getColumn(ci.c).letter+totR;
+            if(bt!=null){ ci.bRound=Math.ceil(Math.round(bt*10000)/10000); ci.sRound=Math.ceil(Math.round(ci.bRound*(1+ci.sur/100)*10000)/10000); } });
+          const toRoundup=set=>{ set.forEach(ci=>{ if(ci.bAddr==null||ci.bRound==null) return; const bc=q.getCell(ci.bAddr), sc=q.getCell(ci.sAddr);
+              const bf=(bc.value&&bc.value.formula)?bc.value.formula:null;
+              if(bf && !/^ROUNDUP/i.test(bf)){ bc.value={formula:'ROUNDUP('+bf+',0)', result:ci.bRound}; }
+              else if(!bf){ const cl=ci.bAddr.replace(/\d+$/,''); bc.value={formula:'ROUNDUP(SUM('+cl+(baseHdr+1)+':'+cl+(bTotR-1)+'),0)', result:ci.bRound}; }
+              sc.value={formula:'ROUNDUP('+ci.bAddr+'*(1+'+ci.sur+'/100),0)', result:ci.sRound}; ci.tot=ci.sRound; added+=2; });
+            /* 총물량 칸 캐시값도 맞춤 */
+            [bTotR+1,totR+1].forEach(gr=>{ const g=q.getCell(gr,2); if(g.value&&g.value.formula&&/^SUM/i.test(g.value.formula)){ let sm=0; colInfo.forEach(ci=>{ sm+=(num(q,gr-1,ci.c)||0); }); g.value={formula:g.value.formula, result:sm}; } }); };
           const KEY=[['싱글',/싱글/],['금속기와',/금속기와/],['배수로',/배수로/],['슬라브',/듀얼|슬라브/],['PVC',/PVC/i],['박공',/박공/]];
           detSecs.forEach(sec=>{ const hq=num(det,sec.hdr,4); if(hq==null||isF(det.getCell(sec.hdr,4))) return;
             const kk=KEY.find(k=>k[1].test(sec.name) && !(k[0]==='슬라브' && /배수로/.test(sec.name))); if(!kk) return;
@@ -7171,6 +7188,10 @@ async function nfUpgradeEstimateXlsx(buf){
             const tries=[base, base.concat(roofAll)];
             let done=false;
             for(const set of tries){ if(!set.length) continue; const sm=set.reduce((a,ci)=>a+ci.tot,0); if(Math.abs(sm-hq)<0.5){ setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+'),hq); done=true; break; } }
+            /* 예전 파일: 물량산출 '전체'를 앱과 같은 ROUNDUP 방식으로 바꾸면 산출내역서 수량과 맞는 경우 → 바꾸고 연결 */
+            if(!done){ for(const set of tries){ if(!set.length || set.some(ci=>ci.sRound==null)) continue; const sm=set.reduce((a,ci)=>a+ci.sRound,0); const df=Math.round(hq-sm);
+                const ok=Math.abs(sm-hq)<0.5 || (/싱글|금속기와/.test(kk[0]) && df>=3 && Math.abs(hq-sm-df)<0.01 && df<=hq*0.1);
+                if(ok){ toRoundup(set); setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+')+(Math.abs(sm-hq)<0.5?'':('+'+df)),hq); done=true; break; } } }
             /* 뻐꾸기창(작은 3㎡·큰 4㎡)이 더해진 싱글·금속기와 — 차이가 정수 3㎡ 이상이고 10% 이내면 '+뻐꾸기창 면적'으로 연결 */
             if(!done && /싱글|금속기와/.test(kk[0])){ for(const set of tries){ if(!set.length) continue; const sm=set.reduce((a,ci)=>a+ci.tot,0); const df=Math.round(hq-sm);
                 if(df>=3 && Math.abs(hq-sm-df)<0.01 && df<=hq*0.1){ setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+')+'+'+df,hq); break; } } }
