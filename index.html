@@ -1185,9 +1185,15 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
         <button class="btn ghost" onclick="exportExcel()">엑셀 바로 저장</button>
         <button class="btn ghost" onclick="window.print()">전체 내역 인쇄 / PDF</button>
       </div>
+      <div style="margin-top:14px;padding:12px 14px;border:1px solid #D8DEE6;border-radius:9px;background:#F1F6F9;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:240px;"><div style="font-weight:700;font-size:13.5px;color:#212A3E;">📤 검토방 카드에 수정본 재첨부</div>
+          <div style="font-size:12px;color:#768194;margin-top:2px;">이미 검토방에 올린 현장을 수정했으면, 새 카드 대신 <b>그 카드 댓글</b>에 '초안본 2차·3차…' 엑셀과 수정 내용을 올립니다.</div></div>
+        <button class="btn" onclick="sendToReviewBoard(true)" style="background:#394867;color:#fff;border-color:#394867;font-weight:700;">📤 수정본 재첨부</button>
+      </div>
     </div>
     <div class="wf-foot">
       <button class="wf-nav" onclick="wfStep(4)">← <span class="nx">④</span> 물량검증</button><div class="sp"></div>
+      <button class="wf-nav" onclick="sendToReviewBoard(true)" title="이미 올린 카드 댓글에 수정본(N차) 엑셀 재첨부">📤 수정본 재첨부</button>
       <button class="wf-nav primary" onclick="sendToReviewBoard()">검토방에 올리기</button></div>
   </div>
 
@@ -7497,9 +7503,14 @@ fillStageSelect();
 window.NF_DASH = {
   /* v7.9: 같은 현장 카드 찾기 — 내역서 수정본을 기존 카드 댓글로 재발행할 때 */
   findCards: function(site){ try{ const nz=x=>String(x||'').replace(/\s+/g,'').toLowerCase(); const k=nz(site); if(!k) return [];
-      return reviews.filter(r=>nz(r.site)===k || (nz(r.site).indexOf(k)>=0 && k.length>=4) || (k.indexOf(nz(r.site))>=0 && nz(r.site).length>=4))
+      const STOP=['아파트','apt','단지','마을','지구','현장'];
+      const toks=x=>String(x||'').toLowerCase().split(/[\s,·_()\-]+/).map(t=>t.trim()).filter(t=>t.length>=2 && STOP.indexOf(t)<0);
+      const kt=toks(site);
+      const score=r=>{ const n=nz(r.site); if(!n) return 0; if(n===k) return 100; if((n.indexOf(k)>=0&&k.length>=4)||(k.indexOf(n)>=0&&n.length>=4)) return 50; const rt=toks(r.site); const common=kt.filter(t=>rt.some(u=>u===t||(t.length>=3&&u.indexOf(t)>=0)||(u.length>=3&&t.indexOf(u)>=0))).length; return common>=2?(10+common):0; };
+      return reviews.map(r=>({r,sc:score(r)})).filter(x=>x.sc>0).sort((a,b)=>b.sc-a.sc).map(x=>x.r)
         .map(r=>({id:r.id, site:r.site, status:r.status, stage:((STAGES.find(s=>s.key===r.status)||{}).label||''), nX:(r.comments||[]).reduce((s,c)=>s+(c.links||[]).filter(nfIsXls).length,0)})); }catch(e){ return []; } },
   team: function(){ try{ return TEAM.slice(); }catch(e){ return []; } },
+  allCards: function(){ try{ return reviews.map(r=>({id:r.id, site:r.site, status:r.status, stage:((STAGES.find(s=>s.key===r.status)||{}).label||''), nX:(r.comments||[]).reduce((s,c)=>s+(c.links||[]).filter(nfIsXls).length,0)})); }catch(e){ return []; } },
   lastAuthor: function(){ try{ return lastAuthor||''; }catch(e){ return ''; } },
   addRevision: async function(o){
     const r=reviews.find(x=>x.id===o.id); if(!r){ toast('카드를 찾을 수 없어요'); return false; }
@@ -7559,7 +7570,7 @@ function gatherSpecialNotes(){
 }
 window.gatherSpecialNotes=gatherSpecialNotes;
 /* v7.9: 재발행 선택창 — 기존 카드 댓글에 수정본(초안본/최종본 N차)으로 올리거나, 새 카드로 등록 */
-function nfReissueDialog(site, cards, autoNotes){
+function nfReissueDialog(site, cards, autoNotes, forced){
   return new Promise(res=>{
     const old=document.getElementById('nfReissue'); if(old) old.remove();
     const esc1=x=>String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -7570,9 +7581,9 @@ function nfReissueDialog(site, cards, autoNotes){
     const w=document.createElement('div'); w.id='nfReissue';
     w.style.cssText='position:fixed;inset:0;background:rgba(20,26,36,.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;';
     w.innerHTML='<div style="background:#fff;border-radius:12px;width:min(560px,96vw);max-height:92vh;overflow:auto;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-size:13.5px;color:#212A3E;">'
-      +'<div style="font-size:16px;font-weight:700;margin-bottom:4px;">검토방에 같은 현장 카드가 있어요</div>'
+      +'<div style="font-size:16px;font-weight:700;margin-bottom:4px;">'+(forced?'📤 검토방 카드에 수정본 재첨부':'검토방에 같은 현장 카드가 있어요')+'</div>'
       +'<div style="color:#768194;font-size:12.5px;margin-bottom:14px;">‘'+esc1(site)+'’ — 기존 카드 댓글에 <b>수정본으로 재발행</b>하면 초안본 1차·2차·3차처럼 이력이 쌓이고, 이 엑셀이 최신 내역서가 됩니다.</div>'
-      +'<label style="display:block;font-weight:600;margin:8px 0 4px;">올릴 카드</label><select id="rsCard" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;">'+cards.map(c=>'<option value="'+esc1(c.id)+'">'+esc1(c.site)+' · '+esc1(c.stage)+' · 엑셀 '+c.nX+'개</option>').join('')+'</select>'
+      +'<label style="display:block;font-weight:600;margin:8px 0 4px;">올릴 카드</label>'+(cards.length>6?'<input id="rsFind" placeholder="현장명 검색" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;margin-bottom:6px;">':'')+'<select id="rsCard" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;">'+cards.map(c=>'<option value="'+esc1(c.id)+'">'+esc1(c.site)+' · '+esc1(c.stage)+' · 엑셀 '+c.nX+'개</option>').join('')+'</select>'
       +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
         +'<div style="flex:2;min-width:180px;"><label style="display:block;font-weight:600;margin-bottom:4px;">재발행 종류</label><select id="rsType" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;">'+TYPES.map((t,i)=>'<option value="'+i+'">'+t[0]+'</option>').join('')+'</select></div>'
         +'<div style="flex:1;min-width:90px;"><label style="display:block;font-weight:600;margin-bottom:4px;">단계</label><select id="rsStage" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;"><option>초안본</option><option>최종본</option></select></div>'
@@ -7595,6 +7606,9 @@ function nfReissueDialog(site, cards, autoNotes){
     const prev=()=>{ const st=$1('rsStage').value, no=$1('rsNo').value||'1'; let nm=''; try{ const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo'); const o=[fs&&fs.value,fk&&fk.value,fn&&fn.value]; if(fs)fs.value=st; if(fk)fk.value='차'; if(fn)fn.value=no; nm=buildEstimateFileName()+'.xlsx'; if(fs)fs.value=o[0]; if(fk)fk.value=o[1]; if(fn)fn.value=o[2]; }catch(_){}
       $1('rsFile').innerHTML='올라갈 파일: <b style="color:#1E9E5A;">'+esc1(nm)+'</b>'; };
     $1('rsCard').onchange=sync; $1('rsStage').onchange=prev; $1('rsNo').oninput=prev; sync();
+    if($1('rsFind')) $1('rsFind').oninput=()=>{ const k=$1('rsFind').value.replace(/\s/g,'').toLowerCase(); const sel=$1('rsCard'); let first=null;
+      Array.from(sel.options).forEach(o=>{ const hit=!k || o.textContent.replace(/\s/g,'').toLowerCase().indexOf(k)>=0; o.hidden=!hit; o.disabled=!hit; if(hit&&!first) first=o; });
+      if(first && (sel.selectedOptions[0]||{}).disabled!==false){ sel.value=first.value; sync(); } else if(first && sel.selectedOptions[0] && sel.selectedOptions[0].hidden){ sel.value=first.value; sync(); } };
     const close=v=>{ w.remove(); res(v); };
     $1('rsCancel').onclick=()=>close('cancel'); $1('rsNew').onclick=()=>close('new');
     w.addEventListener('click',e=>{ if(e.target===w) close('cancel'); });
@@ -7608,7 +7622,7 @@ function nfReissueDialog(site, cards, autoNotes){
   });
 }
 window.nfReissueDialog=nfReissueDialog;
-window.sendToReviewBoard = async function(){
+window.sendToReviewBoard = async function(forceRevise){
   try{
     if(typeof ExcelJS==='undefined'){ alert('엑셀 라이브러리(ExcelJS) 로딩 필요 — 새로고침 후 다시 시도'); return; }
     const project=(document.getElementById('project')&&document.getElementById('project').value)||'';
@@ -7641,9 +7655,14 @@ window.sendToReviewBoard = async function(){
     const due = ((document.getElementById('reviewDue')||{}).value||'').trim();   /* 마감날짜(선택) */
     /* v7.9: 같은 현장 카드가 이미 있으면 → 그 카드 댓글에 '초안본 N차' 수정본으로 재발행할지 먼저 물어봄 */
     try{
-      const ex=(window.NF_DASH.findCards?window.NF_DASH.findCards(site):[]);
+      let ex=(window.NF_DASH.findCards?window.NF_DASH.findCards(site):[]);
+      if(forceRevise===true){   /* v8.2: '수정본 재첨부' 버튼 — 같은 현장 카드가 위, 나머지 카드도 모두 고를 수 있게 */
+        const all=(window.NF_DASH.allCards?window.NF_DASH.allCards():[]);
+        const ids=ex.map(c=>c.id); ex=ex.concat(all.filter(c=>ids.indexOf(c.id)<0));
+        if(!ex.length){ alert('검토방에 올라간 카드가 아직 없어요. [검토방에 올리기]로 먼저 등록해 주세요.'); return; }
+      }
       if(ex.length){
-        const choice=await nfReissueDialog(site, ex, notes);
+        const choice=await nfReissueDialog(site, ex, notes, forceRevise===true);
         if(choice==='cancel') return;
         if(choice && choice.mode==='revise'){
           const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo');
