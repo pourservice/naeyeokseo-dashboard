@@ -4917,7 +4917,7 @@ function koNum(n){
   }
   return res;
 }
-const NF_XL_VER='POUR내역서 v8.1 (전 시트 수식 연결)';
+const NF_XL_VER='POUR내역서 v8.2 (전 시트 수식 연결)';
 async function buildConsultingWorkbook(d){
   const EJS=(typeof ExcelJS!=='undefined')?ExcelJS:require('exceljs');
   const wb=new EJS.Workbook(); wb.creator='넷폼'; wb.subject=NF_XL_VER; wb.keywords=NF_XL_VER;   /* 파일 속성에 생성 버전 기록 — 어느 버전으로 만든 파일인지 확인용 */
@@ -7058,6 +7058,7 @@ try{ window.nfGdConnect=nfGdConnect; }catch(_){}
 /* ===== v7.9: 검토방 엑셀 최신양식 업데이트 — 예전 버전으로 만든 내역서에 합계 수식·갑지 글씨를 넣어 같은 자리에서 교체 =====
    · 금액은 절대 바꾸지 않음: 수식 결과가 지금 칸의 숫자와 같을 때(±1원)만 수식으로 바꾸고, 다르면 숫자 그대로 둠
    · 교체 전 원본 주소는 l.prevUrl 에 보관 */
+const NF_UPG_COVER=false;   /* v8.1: 수식만 넣음 — 갑지·글자·숫자는 절대 안 바꿈 */
 async function nfUpgradeEstimateXlsx(buf){
   const wb=new ExcelJS.Workbook(); await wb.xlsx.load(buf);
   const need=['갑지','원가계산서','집계표','산출내역서'];
@@ -7188,13 +7189,15 @@ async function nfUpgradeEstimateXlsx(buf){
             const tries=[base, base.concat(roofAll)];
             let done=false;
             for(const set of tries){ if(!set.length) continue; const sm=set.reduce((a,ci)=>a+ci.tot,0); if(Math.abs(sm-hq)<0.5){ setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+'),hq); done=true; break; } }
+            /* 뻐꾸기창(작은 3㎡·큰 4㎡)이 더해진 싱글·금속기와 — 차이가 정수 3㎡ 이상이고 10% 이내면 '+뻐꾸기창 면적'으로 연결 */
+            if(!done && /싱글|금속기와/.test(kk[0])){ for(const set of tries){ if(!set.length) continue; const sm=set.reduce((a,ci)=>a+ci.tot,0); const df=Math.round(hq-sm);
+                if(df>=3 && Math.abs(hq-sm-df)<0.01 && df<=hq*0.1){ setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+')+'+'+df,hq); done=true; break; } } }
             /* 예전 파일: 물량산출 '전체'를 앱과 같은 ROUNDUP 방식으로 바꾸면 산출내역서 수량과 맞는 경우 → 바꾸고 연결 */
             if(!done){ for(const set of tries){ if(!set.length || set.some(ci=>ci.sRound==null)) continue; const sm=set.reduce((a,ci)=>a+ci.sRound,0); const df=Math.round(hq-sm);
                 const ok=Math.abs(sm-hq)<0.5 || (/싱글|금속기와/.test(kk[0]) && df>=3 && Math.abs(hq-sm-df)<0.01 && df<=hq*0.1);
-                if(ok){ toRoundup(set); setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+')+(Math.abs(sm-hq)<0.5?'':('+'+df)),hq); done=true; break; } } }
-            /* 뻐꾸기창(작은 3㎡·큰 4㎡)이 더해진 싱글·금속기와 — 차이가 정수 3㎡ 이상이고 10% 이내면 '+뻐꾸기창 면적'으로 연결 */
-            if(!done && /싱글|금속기와/.test(kk[0])){ for(const set of tries){ if(!set.length) continue; const sm=set.reduce((a,ci)=>a+ci.tot,0); const df=Math.round(hq-sm);
-                if(df>=3 && Math.abs(hq-sm-df)<0.01 && df<=hq*0.1){ setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+')+'+'+df,hq); break; } } }
+                if(ok){ /* 물량산출 칸은 그대로 두고, 산출내역서 수량 칸 안에서 앱과 같은 올림 계산 → 숫자 변화 없음 */
+                  const fx=set.map(ci=>{ const cl=ci.bAddr.replace(/\d+$/,''); return "ROUNDUP(ROUNDUP(SUM('물량산출내역서'!"+cl+(baseHdr+1)+":"+cl+(bTotR-1)+"),0)*(1+"+ci.sur+"/100),0)"; }).join('+');
+                  setF(det,sec.hdr,4,fx+(Math.abs(sm-hq)<0.5?'':('+'+df)),hq); done=true; break; } } }
           });
         }
       }
@@ -7202,7 +7205,7 @@ async function nfUpgradeEstimateXlsx(buf){
   }catch(e){ console.warn('[연결 업데이트]',e); }
   /* 갑지 — 글씨 있는 표지로 교체 */
   let cover=false;
-  try{ const gap=wb.getWorksheet('갑지'); const imgs=gap.getImages(); if(imgs.length && typeof POUR_COVER_B64==='string'){ const m=wb.getImage(imgs[0].imageId);
+  if(typeof NF_UPG_COVER!=='undefined' && NF_UPG_COVER) try{ const gap=wb.getWorksheet('갑지'); const imgs=gap.getImages(); if(imgs.length && typeof POUR_COVER_B64==='string'){ const m=wb.getImage(imgs[0].imageId);
       const nb=nfB64ToBuf(POUR_COVER_B64); const same=m && m.buffer && m.buffer.byteLength===nb.byteLength;
       if(m && !same){ m.buffer=(typeof Buffer!=='undefined')?Buffer.from(nb):new Uint8Array(nb); delete m.base64; delete m.filename; m.extension='jpeg'; cover=true; } } }catch(e){ console.warn('[갑지 교체]',e); }
   if(!added && !cover) return {skip:'이미 최신', kept};
@@ -7215,7 +7218,7 @@ async function nfUpgradeAllEstimates(){
   const jobs=[];
   (reviews||[]).forEach(r=>{ (r.comments||[]).forEach(c=>{ (c.links||[]).forEach(l=>{ if(l && l.url && /\.xlsx$/i.test(l.name||'') && l.upgraded!==NF_XL_VER) jobs.push({r,c,l}); });   /* v8.0: 예전에 업데이트한 파일도 새 연결 넣으려고 다시 처리 */ }); });
   if(!jobs.length){ toast('업데이트할 엑셀이 없어요 ✓'); return; }
-  if(!confirm('검토방에 올라간 내역서 엑셀 '+jobs.length+'개를 확인해서, 예전 버전 파일에 수식 연결(일위대가→산출내역서 단가, 물량산출→수량, 단가 합계, 합계 수식)과 갑지 글씨를 넣고 같은 자리에서 교체합니다.\n· 금액은 바뀌지 않습니다 (숫자가 다른 칸은 그대로 둠)\n· 원본 주소는 따로 보관됩니다\n끝날 때까지 창을 닫지 마세요.')) return;
+  if(!confirm('검토방에 올라간 내역서 엑셀 '+jobs.length+'개를 확인해서, 수식만 넣고(일위대가→산출내역서 단가, 물량산출→수량, 단가 합계, 합계 수식) 같은 자리에서 교체합니다. 글자·숫자·갑지는 바꾸지 않습니다.\n· 금액은 바뀌지 않습니다 (숫자가 다른 칸은 그대로 둠)\n· 원본 주소는 따로 보관됩니다\n끝날 때까지 창을 닫지 마세요.')) return;
   let done=0, skip=0, fail=0, kept=0;
   for(let i=0;i<jobs.length;i++){ const {r,l}=jobs[i];
     toast('🔧 엑셀 업데이트 중… '+(i+1)+'/'+jobs.length+' '+(r.site||''));
