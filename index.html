@@ -6802,7 +6802,7 @@ async function nfScopeFromXlsx(f){
   nfScopeCache[key]=v; return v;
 }
 function nfMailDialog(r,f0){
-  const atts=(Array.isArray(f0)?f0:[f0]).filter(Boolean).map(x=>({f:x}));   /* {f:카드 파일} 또는 {file:내 PC 파일} */
+  const atts=[]; (Array.isArray(f0)?f0:[f0]).filter(Boolean).forEach(x=>{ if(!atts.some(a=>a.f&&a.f.name===x.name)) atts.push({f:x}); });   /* 같은 이름 파일은 한 번만 */   /* {f:카드 파일} 또는 {file:내 PC 파일} */
   const f=(atts.find(a=>nfIsXls(a.f))||atts[0]||{}).f||{};
   const old=document.getElementById('nfMail'); if(old) old.remove();
   const isFinal=/최종본/.test(f&&f.name||'') || r.status==='final' || r.status==='done';
@@ -6870,10 +6870,10 @@ function nfMailDialog(r,f0){
   };
   const cardFiles=()=>{ const out=[], seen=new Set(); (r.comments||[]).slice().reverse().forEach(c=>(c.links||[]).forEach(l=>{ if(!l||!l.name) return; const k=nfFileKey(l); if(seen.has(k)) return; seen.add(k); out.push({l,c}); })); return out; };
   const drawPick=()=>{ const box=$1('mlPick'); if(box.style.display==='none') return; const have=new Set(atts.filter(a=>a.f).map(a=>nfFileKey(a.f)));
-    const list=cardFiles().filter(x=>!have.has(nfFileKey(x.l)));
+    const haveN=new Set(atts.filter(a=>a.f).map(a=>a.f.name)); const list=cardFiles().filter(x=>!have.has(nfFileKey(x.l)) && !haveN.has(x.l.name));
     box.innerHTML=list.length?list.map((x,i)=>{ const ic=attIc(x.l.name); return '<label style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid #F0F2F5;cursor:pointer;"><input type="checkbox" data-pk="'+i+'" style="width:auto;margin:0;"><span style="color:'+ic[1]+';font-weight:800;font-size:11px;min-width:26px;">'+ic[0]+'</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(x.l.name)+'</span><span style="color:#768194;font-size:11px;white-space:nowrap;">'+esc(x.c.author||'')+' '+esc(String(x.c.ts||'').slice(5,10).replace('-','/'))+'</span></label>'; }).join('')+'<div style="padding:6px 10px;text-align:right;"><button type="button" id="mlPickOk" style="padding:5px 12px;border:1px solid #394867;background:#394867;color:#fff;border-radius:7px;cursor:pointer;">선택한 파일 추가</button></div>'
       :'<div style="padding:10px;color:#768194;text-align:center;">이 카드에 더 올라온 파일이 없어요</div>';
-    const ok=$1('mlPickOk'); if(ok) ok.onclick=()=>{ box.querySelectorAll('[data-pk]').forEach(cb=>{ if(cb.checked) atts.push({f:list[+cb.getAttribute('data-pk')].l}); }); box.style.display='none'; drawAtt(); };
+    const ok=$1('mlPickOk'); if(ok) ok.onclick=()=>{ box.querySelectorAll('[data-pk]').forEach(cb=>{ if(cb.checked){ const l=list[+cb.getAttribute('data-pk')].l; if(!atts.some(a=>a.f&&a.f.name===l.name)) atts.push({f:l}); else toast('같은 이름 파일이 이미 있어요: '+l.name); } }); box.style.display='none'; drawAtt(); };
   };
   $1('mlAddCard').onclick=()=>{ const b=$1('mlPick'); b.style.display=(b.style.display==='none')?'block':'none'; drawPick(); };
   $1('mlAddPc').onchange=e=>{ [...(e.target.files||[])].forEach(file=>atts.push({file})); e.target.value=''; drawAtt(); };
@@ -6911,36 +6911,52 @@ function nfMailDialog(r,f0){
     if(!atts.length && !confirm('첨부 파일 없이 보낼까요?')) return;
     if(!confirm('‘'+to+'’에게 '+NF_MAIL_TPL[$1('mlTpl').value].label+' 메일을 발송할까요?\n첨부 '+atts.length+'개: '+atts.map(attName).join(', '))) return;
     const btn=$1('mlSend'); btn.disabled=true; btn.textContent='발송 중…';
+    let mlBodyBefore=null;
     try{
-      /* 첨부 준비: 드라이브 파일은 서버가 직접 받음(크기 무관) · 내 PC 파일은 먼저 드라이브에 올려 카드에도 기록 · 나머지는 직접 실어 보냄(합계 약 3MB) */
+      /* 첨부 준비: 드라이브 파일은 서버가 직접 받음(크기 무관) · 드라이브에 없는 파일(내 PC·옛 첨부)은 먼저 드라이브에 올림 · 작은 파일만 직접 실어 보냄(합계 약 3MB) */
       const toB64=buf=>{ let bin=''; const u8=new Uint8Array(buf); for(let i=0;i<u8.length;i+=0x8000) bin+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return btoa(bin); };
-      const parts=[], upLinks=[]; let inline=0; const big=[];
-      for(let i=0;i<atts.length;i++){ const a=atts[i]; btn.textContent='첨부 준비 중… ('+(i+1)+'/'+atts.length+')';
-        let lf=a.f;
-        if(a.file){ try{ const up=await nfUploadAttachment(a.file, r.id); if(up&&up.url){ lf=up; upLinks.push(up); } }catch(e){ console.warn('[mail att upload]',e); } }
-        const u=String(lf&&lf.url||'');
-        if(u.indexOf('gdrive:')===0){ parts.push({name:attName(a), gdriveId:u.slice(7), apiKey:NF_GD_API_KEY}); continue; }
-        const buf=a.file?await a.file.arrayBuffer():await nfFileBytes(a.f);
-        inline+=buf.byteLength; if(buf.byteLength>1.5*1048576) big.push(attName(a)+' '+(buf.byteLength/1048576).toFixed(1)+'MB');
-        parts.push({name:attName(a), b64:toB64(buf)});
+      const MB=1048576, fmtMB=n=>(n/MB).toFixed(1)+'MB';
+      const parts=[], upLinks=[]; let inline=0, total=0, cardChanged=false; const big=[];
+      for(let i=0;i<atts.length;i++){ const a=atts[i]; const nm=attName(a); btn.textContent='첨부 준비 중… ('+(i+1)+'/'+atts.length+') '+nm;
+        let u=String(a.f&&a.f.url||''), size=attSize(a);
+        if(a.file){ try{ const up=await nfUploadAttachment(a.file, r.id); if(up&&up.url){ upLinks.push(up); u=String(up.url); } }catch(e){ console.warn('[mail att upload]',e); } }
+        if(u.indexOf('gdrive:')===0){ parts.push({name:nm, gdriveId:u.slice(7), apiKey:NF_GD_API_KEY, size}); total+=size; continue; }
+        const buf=a.file?await a.file.arrayBuffer():await nfFileBytes(a.f); size=buf.byteLength;
+        if(!a.file && size>1.5*MB){   /* 카드에 있는데 드라이브가 아닌 큰 파일 → 드라이브로 올리고 카드 링크도 드라이브로 바꿔 둠(📦 드라이브 이관과 같은 동작) */
+          try{ btn.textContent='드라이브에 올리는 중… '+nm; const up=await nfUploadAttachment(new File([buf], nm, {type:nfMimeFromName(nm)}), r.id);
+            if(up&&String(up.url).indexOf('gdrive:')===0){ a.f.url=up.url; if(!a.f.size) a.f.size=size; cardChanged=true; parts.push({name:nm, gdriveId:String(up.url).slice(7), apiKey:NF_GD_API_KEY, size}); total+=size; continue; } }catch(e){ console.warn('[mail att gd]',e); } }
+        inline+=size; total+=size; if(size>1.5*MB) big.push(nm+' '+fmtMB(size));
+        parts.push({name:nm, b64:toB64(buf), size});
       }
-      if(inline>3.2*1048576) throw new Error('드라이브에 없는 첨부 합계가 '+(inline/1048576).toFixed(1)+'MB라 한 번에 보낼 수 없어요 (약 3MB까지).\n큰 파일: '+(big.join(', ')||'-')+'\n→ 📦 드라이브 이관 후 다시 보내거나, 파일을 나눠서 보내 주세요.');
+      if(cardChanged){ try{ await save(); }catch(_){} }
+      if(inline>3.2*MB) throw new Error('드라이브에 올리지 못한 첨부가 '+fmtMB(inline)+'라 한 번에 보낼 수 없어요 (약 3MB까지).\n큰 파일: '+(big.join(', ')||'-')+'\n→ 검토 대시보드 위쪽 📁 드라이브 연결(poursolution22 계정) 후 다시 보내 주세요.');
+      /* 받는 쪽 메일 서버는 보통 20~25MB 넘는 메일을 거절 → 큰 파일은 다운로드 링크로 */
+      const linkParts=[];
+      if(total>20*MB){
+        const cand=parts.filter(p=>p.gdriveId).sort((x,y)=>(y.size||0)-(x.size||0));
+        if(cand.length && confirm('첨부 합계가 '+fmtMB(total)+'예요. 받는 쪽에서 메일이 거절될 수 있어요(보통 20~25MB까지).\n\n[확인] 큰 파일은 본문에 ‘다운로드 링크’로 넣어 보내기 (추천)\n[취소] 그래도 전부 첨부해서 보내기')){
+          let left=total; for(const p of cand){ if(left<=15*MB) break; linkParts.push(p); left-=(p.size||0); }
+        }
+      }
+      const sendParts=parts.filter(p=>linkParts.indexOf(p)<0).map(p=>{ const o=Object.assign({},p); delete o.size; return o; });
+      if(linkParts.length){ mlBodyBefore=$1('mlBody').value; const lines=linkParts.map(p=>'- '+p.name+(p.size?' ('+fmtMB(p.size)+')':'')+' : '+nfGdViewUrl(p.gdriveId)).join('\n');
+        $1('mlBody').value=$1('mlBody').value.replace(/\s+$/,'')+'\n\n[첨부파일 다운로드]\n'+lines+'\n'; }
       btn.textContent='발송 중…';
-      const attachment=parts[0], attachments=parts.slice(1); mailUpLinks=upLinks;
+      const attachment=sendParts[0], attachments=sendParts.slice(1); mailUpLinks=upLinks;
       const body=$1('mlBody').value;
-      const html='<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:14px;line-height:1.7;color:#222;">'+esc(body).replace(/\n/g,'<br>')+'</div>';
+      const html='<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:14px;line-height:1.7;color:#222;">'+esc(body).replace(/(https:\/\/[^\s<]+)/g,'<a href="$1">$1</a>').replace(/\n/g,'<br>')+'</div>';
       const resp=await fetch(c.url,{method:'POST', headers:{'Content-Type':'text/plain;charset=UTF-8'}, body:JSON.stringify({key:c.key, to, cc:$1('mlCc').value.trim()||undefined, subject:$1('mlSubj').value, text:body, html, attachment, attachments})});
       let j={}; try{ j=await resp.json(); }catch(_){}
       if(!resp.ok||!j.ok) throw new Error(j.error||('서버 응답 '+resp.status));
-      const oldSrv=(j.attached===true && parts.length>1);   /* 발송 서버가 옛 버전이면 첫 파일만 붙음 */
+      const oldSrv=(j.attached===true && sendParts.length>1);   /* 발송 서버가 옛 버전이면 첫 파일만 붙음 */
       const kind=NF_MAIL_TPL[$1('mlTpl').value].label;
-      await saveCard('📧 '+kind+' 메일 발송 완료\n- 받는 사람: '+to+($1('mlCc').value.trim()?('\n- 참조: '+$1('mlCc').value.trim()):'')+'\n- 제목: '+$1('mlSubj').value+'\n- 첨부: '+(atts.map(attName).join(', ')||'없음')+(oldSrv?'\n- ⚠ 발송 서버가 옛 버전이라 첫 파일만 첨부됨':'')+(j.sentFolder?('\n- 보낸편지함 저장: '+j.sentFolder):(j.sentErr?('\n- ⚠ 보낸편지함 저장 실패: '+j.sentErr):'')));
+      await saveCard('📧 '+kind+' 메일 발송 완료\n- 받는 사람: '+to+($1('mlCc').value.trim()?('\n- 참조: '+$1('mlCc').value.trim()):'')+'\n- 제목: '+$1('mlSubj').value+'\n- 첨부: '+(atts.map(attName).join(', ')||'없음')+(linkParts.length?('\n- 다운로드 링크로 보냄: '+linkParts.map(p=>p.name).join(', ')):'')+(oldSrv?'\n- ⚠ 발송 서버가 옛 버전이라 첫 파일만 첨부됨':'')+(j.sentFolder?('\n- 보낸편지함 저장: '+j.sentFolder):(j.sentErr?('\n- ⚠ 보낸편지함 저장 실패: '+j.sentErr):'')));
       /* 발송에 쓴 새 메일 주소는 주소록에 자동 저장(업체 = 카드 요청사) → 다음부터 업체명으로 바로 검색 */
       try{ const o=nfCtGet(); const have=new Set(o.list.map(x=>String(x.e).toLowerCase())); let add=0;
         (to+','+($1('mlCc').value||'')).split(/[,;]/).map(x=>x.trim()).filter(x=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)).forEach(e=>{ if(!have.has(e.toLowerCase())){ have.add(e.toLowerCase()); o.list.push({c:(r.req||r.site||'').trim(), n:'', d:'메일 발송 때 자동 저장', e}); add++; } });
         if(add){ o.at=new Date().toISOString(); o.by=lastAuthor||''; nfCtSave(o); } }catch(_){}
       close(); toast('메일을 보냈어요 (첨부 '+atts.length+'개)'); if(oldSrv) alert('메일은 보냈지만 발송 서버가 옛 버전이라 첫 파일만 첨부됐어요.\nGitHub의 netformconsulting-mail 저장소에 새 send.js를 올려 주세요.');
-    }catch(e){ console.error('[mail]',e); alert('메일 발송 실패: '+(e&&e.message?e.message:e)); btn.disabled=false; btn.textContent='📧 발송'; }
+    }catch(e){ if(mlBodyBefore!=null) $1('mlBody').value=mlBodyBefore; console.error('[mail]',e); alert('메일 발송 실패: '+(e&&e.message?e.message:e)); btn.disabled=false; btn.textContent='📧 발송'; }
   };
 }
 
