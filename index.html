@@ -921,7 +921,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
 
     <div class="section-label"><span class="bar"></span>현장사진 <span class="note">— 칸을 누르면 바로 사진을 올릴 수 있어요 · 엑셀 현장사진 시트에 그대로 들어갑니다</span></div>
     <div class="panel">
-      <div class="panel-head"><h3>현장사진 (3×3)</h3><button class="btn sm ghost" onclick="clearAllPhotos()">전체 비우기</button></div>
+      <div class="panel-head"><h3>현장사진 (3×3)</h3><div style="display:flex;gap:6px;"><button class="btn sm ghost" onclick="importPhotosFromIssued()" title="예전에 발행한 엑셀의 현장사진 시트에서 사진을 다시 가져와요">📥 발행 엑셀에서 불러오기</button><button class="btn sm ghost" onclick="clearAllPhotos()">전체 비우기</button></div></div>
       <div id="photoGrid" class="photo-grid"></div>
       <input type="file" id="photoFile" accept="image/*" style="display:none" onchange="onPhotoPicked(event)">
       <p class="hint-box" style="margin-top:10px;">· 빈 칸을 누르면 사진을 선택할 수 있고, 넣은 사진을 누르면 교체·삭제할 수 있어요. 큰 사진은 자동으로 줄여 저장합니다.</p>
@@ -2297,8 +2297,58 @@ async function photoCoverCrop(src, targetW, targetH){
     im.onerror=()=>res(src); im.src=src;
   });
 }
-function loadPhotos(){ try{ const s=localStorage.getItem(PHOTO_KEY); sitePhotos=s?JSON.parse(s):[]; }catch(e){ sitePhotos=[]; } if(!Array.isArray(sitePhotos)) sitePhotos=[]; }
-function savePhotos(){ try{ localStorage.setItem(PHOTO_KEY, JSON.stringify(sitePhotos)); }catch(e){ alert('사진 저장 공간이 부족해요. 사진 장수를 줄이거나 더 작은 사진을 사용해 주세요.'); } }
+/* v8.6: 사진 저장소 — 브라우저 기본 저장공간(약 5MB, 발행이력·대시보드와 같이 씀) 대신 큰 저장공간(IndexedDB, 수백MB)에 보관.
+   · 현장사진은 '발행본(현장)별'로 따로 저장 → 발행이력에서 다시 열어도 그 현장 사진이 그대로 나옴
+   · 예전에 기본 저장공간에 있던 사진·위성사진은 처음 열 때 자동으로 옮기고 기본 저장공간은 비움 */
+const NF_MEDIA={ _p:null,
+  open(){ if(this._p) return this._p; this._p=new Promise((res,rej)=>{ try{ const r=indexedDB.open('nf_media',1); r.onupgradeneeded=()=>{ try{ r.result.createObjectStore('kv'); }catch(_){} }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error||new Error('IndexedDB 열기 실패')); }catch(e){ rej(e); } }); return this._p; },
+  async get(k){ const db=await this.open(); return new Promise((res,rej)=>{ const t=db.transaction('kv','readonly').objectStore('kv').get(k); t.onsuccess=()=>res(t.result); t.onerror=()=>rej(t.error); }); },
+  async set(k,v){ const db=await this.open(); return new Promise((res,rej)=>{ const tx=db.transaction('kv','readwrite'); tx.objectStore('kv').put(v,k); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error); }); },
+  async del(k){ const db=await this.open(); return new Promise((res,rej)=>{ const tx=db.transaction('kv','readwrite'); tx.objectStore('kv').delete(k); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); }); }
+};
+try{ window.NF_MEDIA=NF_MEDIA; }catch(_){}
+function photoKeyNow(){ return (typeof loadedReportId!=='undefined' && loadedReportId) ? loadedReportId : '__draft__'; }
+function loadPhotos(){ /* 화면을 바로 그리려고 예전 보관분을 먼저 읽고 → 큰 저장공간으로 옮긴 뒤 현재 현장 사진 다시 읽음 */
+  let legacy=null; try{ const s=localStorage.getItem(PHOTO_KEY); legacy=s?JSON.parse(s):null; }catch(e){}
+  sitePhotos=Array.isArray(legacy)?legacy:[];
+  (async()=>{ try{
+    if(Array.isArray(legacy)){ const had=await NF_MEDIA.get('photos:__draft__'); if(!Array.isArray(had)) await NF_MEDIA.set('photos:__draft__', legacy); try{ localStorage.removeItem(PHOTO_KEY); }catch(_){} }
+    await loadPhotosFor(photoKeyNow());
+  }catch(e){ console.warn('[사진 저장소]',e); } })();
+}
+async function loadPhotosFor(key){ try{ const a=await NF_MEDIA.get('photos:'+key); sitePhotos=Array.isArray(a)?a:[]; }catch(e){ sitePhotos=[]; } try{ renderPhotoGrid(); }catch(_){} }
+function savePhotosTo(key){ const arr=(sitePhotos||[]).slice();
+  NF_MEDIA.set('photos:'+key, arr).catch(e=>{ console.warn('[사진 저장]',e); try{ localStorage.setItem(PHOTO_KEY, JSON.stringify(arr)); }catch(_){ alert('사진을 저장하지 못했어요. 브라우저 저장공간을 확인해 주세요.'); } }); }
+function savePhotos(){ savePhotosTo(photoKeyNow()); }
+window.loadPhotosFor=loadPhotosFor;
+/* v8.6: 예전 발행본 현장사진 복구 — 발행했던 엑셀의 '현장사진' 시트에서 사진 9칸을 꺼내 다시 채움 */
+async function photosFromXlsx(buf){
+  const wb=new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const ws=wb.getWorksheet('현장사진') || wb.worksheets.find(w=>/현장\s*사진/.test(w.name)); if(!ws) return null;
+  const imgs=(ws.getImages()||[]).map(im=>{ const tl=(im.range&&im.range.tl)||{}; const row=(tl.nativeRow!=null?tl.nativeRow:tl.row)||0, col=(tl.nativeCol!=null?tl.nativeCol:tl.col)||0; const m=wb.getImage(im.imageId); return {row,col,m}; }).filter(x=>x.m&&(x.m.buffer||x.m.base64));
+  if(!imgs.length) return [];
+  const toUrl=m=>{ const ext=(m.extension==='png')?'png':'jpeg'; if(m.base64) return 'data:image/'+ext+';base64,'+String(m.base64).replace(/^data:[^,]*,/,''); const u8=new Uint8Array(m.buffer); let b=''; for(let i=0;i<u8.length;i+=0x8000) b+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return 'data:image/'+ext+';base64,'+btoa(b); };
+  const out=new Array(PHOTO_MAX).fill(null);
+  /* 자동화 양식: 3×3 칸 (행 4·13·22 / 열 A·G·M) — 위치로 칸 번호 매김. 다른 양식은 위→아래, 왼→오 순서 */
+  const std=imgs.every(x=>[3,12,21].indexOf(Math.round(x.row))>=0 && [0,6,12].indexOf(Math.round(x.col))>=0);
+  if(std) imgs.forEach(x=>{ const i=[3,12,21].indexOf(Math.round(x.row))*3+[0,6,12].indexOf(Math.round(x.col)); if(i>=0&&i<PHOTO_MAX&&!out[i]) out[i]=toUrl(x.m); });
+  else imgs.sort((a,b)=>(a.row-b.row)||(a.col-b.col)).slice(0,PHOTO_MAX).forEach((x,i)=>{ out[i]=toUrl(x.m); });
+  return out;
+}
+async function importPhotosFromIssued(){
+  const site=((document.getElementById('client')||{}).value||(document.getElementById('project')||{}).value||'').trim();
+  if((sitePhotos||[]).some(Boolean) && !confirm('지금 칸에 있는 사진을 엑셀 사진으로 바꿀까요?')) return;
+  let got=null, from='';
+  try{ if(site && window.NF_DASH && NF_DASH.latestXlsx){ toast('검토 대시보드에서 ‘'+site+'’ 최신 내역서를 찾는 중…'); const x=await NF_DASH.latestXlsx(site); if(x&&x.buf){ got=await photosFromXlsx(x.buf); from=x.name; } } }catch(e){ console.warn('[사진 복구]',e); }
+  if(!got || !got.some(Boolean)){
+    if(!confirm((site?'대시보드에서 ‘'+site+'’ 엑셀 사진을 찾지 못했어요.\n':'')+'PC에 있는 발행 엑셀 파일을 직접 골라서 사진을 가져올까요?')) return;
+    const f=await new Promise(res=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='.xlsx,.xlsm'; inp.onchange=()=>res(inp.files&&inp.files[0]); inp.click(); }); if(!f) return;
+    try{ got=await photosFromXlsx(await f.arrayBuffer()); from=f.name; }catch(e){ alert('엑셀을 읽지 못했어요: '+(e&&e.message||e)); return; }
+  }
+  if(!got || !got.some(Boolean)){ alert('그 엑셀의 현장사진 시트에 사진이 없어요.'); return; }
+  sitePhotos=got; savePhotos(); renderPhotoGrid(); toast('✓ 현장사진 '+got.filter(Boolean).length+'장을 불러왔어요 ('+from+')');
+}
+window.importPhotosFromIssued=importPhotosFromIssued; window.photosFromXlsx=photosFromXlsx;
 function renderPhotoGrid(){
   const host=document.getElementById('photoGrid'); if(!host) return;
   let h='';
@@ -3256,8 +3306,15 @@ window.satPickOcr=satPickOcr; window.satRescan=satRescan;
    · 팀 동기화(nf_history)에는 넣지 않고(용량/Firestore 1MB 회피), 이 브라우저 localStorage에만 현장별로 저장
    · 현장 식별키 = 발행이력 id(loadedReportId) 있으면 그 id, 없으면 '__draft__' */
 const NF_SAT_KEY='nf_sat_images';
-function satStoreRead(){ try{ return JSON.parse(localStorage.getItem(NF_SAT_KEY)||'{}')||{}; }catch(_){ return {}; } }
+let __satCache=null, __satDone=false;
+const __satReady=(async()=>{ try{
+    let o=await NF_MEDIA.get('sat_all'); let lo=null; try{ lo=JSON.parse(localStorage.getItem(NF_SAT_KEY)||'null'); }catch(_){}
+    if(lo && typeof lo==='object'){ o=Object.assign({}, lo, o||{}); await NF_MEDIA.set('sat_all', o); try{ localStorage.removeItem(NF_SAT_KEY); }catch(_){} }   /* 예전 위성사진 → 큰 저장공간으로 이사 */
+    __satCache=(o&&typeof o==='object')?o:{};
+  }catch(e){ console.warn('[위성사진 저장소]',e); __satCache=null; } __satDone=true; })();
+function satStoreRead(){ if(__satCache) return __satCache; try{ return JSON.parse(localStorage.getItem(NF_SAT_KEY)||'{}')||{}; }catch(_){ return {}; } }
 function satStoreWrite(o, keepKey){
+  if(__satCache){ __satCache=o; NF_MEDIA.set('sat_all', o).catch(e=>console.warn('[위성사진 저장]',e)); return true; }   /* v8.6: 큰 저장공간 — 오래된 현장 사진을 지우지 않음 */
   try{ localStorage.setItem(NF_SAT_KEY, JSON.stringify(o)); return true; }
   catch(e){ /* 용량 초과 → 오래된 현장부터 정리(현재 현장은 유지) */
     const ks=Object.keys(o).filter(k=>k!==keepKey).sort((a,b)=>(o[a]&&o[a]._ts||0)-(o[b]&&o[b]._ts||0));
@@ -3273,9 +3330,11 @@ function satImagesPersist(){
   else { o[key]={ sat:sat, _ts:Date.now() }; }
   satStoreWrite(o, key);
 }
-function satImagesLoadFor(key){
-  const o=satStoreRead(); const e=o[key];
-  crossState.sat = (e&&e.sat && typeof e.sat==='object') ? e.sat : {};
+let __satCurKey=null;
+function satImagesLoadFor(key){ __satCurKey=key;
+  const apply=merge=>{ const e=satStoreRead()[key]; const stored=(e&&e.sat&&typeof e.sat==='object')?e.sat:{}; crossState.sat = merge ? Object.assign({}, stored, crossState.sat||{}) : Object.assign({}, stored); };
+  apply(false);
+  if(!__satDone) __satReady.then(()=>{ if(__satCurKey!==key) return; apply(true); try{ crossRenderResults(); }catch(_){} });   /* 저장소 준비 전이면 준비 후 다시 불러옴 */
 }
 window.satImagesPersist=satImagesPersist;
 
@@ -4790,6 +4849,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   setTimeout(function(){ __pcHistReady=true; try{ window.nfBootDone=true; }catch(e){} },0);
   /* 현장사진 로드·렌더 */
   try{ loadPhotos(); renderPhotoGrid(); }catch(e){ console.error('photo init',e); }
+  try{ __satReady.then(()=>{ if(!loadedReportId && !Object.keys(crossState.sat||{}).length){ satImagesLoadFor('__draft__'); try{ crossRenderResults(); }catch(_){} } }); }catch(e){}   /* v8.6: 작성 중이던 위성사진도 다시 열면 그대로 */
   /* 안내문구 로드·렌더 */
   try{ loadNotices(); renderNotices(); }catch(e){ console.error('notice init',e); }
   /* ── v6.9: 최초 진입 화면을 홈으로 + 톱바 날짜 ── */
@@ -4827,7 +4887,8 @@ function restoreSnapshot(s){
   materialMult=(st.materialMult!=null)?st.materialMult:1;
   if(st.cross){ Object.keys(crossState).forEach(k=>{ if(st.cross[k]!==undefined) crossState[k]=cloneJ(st.cross[k]); }); }
   crossState.satOcr={}; crossState.satShareUrls={};
-  try{ satImagesLoadFor((s&&s.id)?s.id:'__draft__'); }catch(_){ crossState.sat={}; }   /* ★ 현장별로 저장해둔 위성사진 복원 (없으면 빈 상태) */
+  try{ satImagesLoadFor((s&&s.id)?s.id:'__draft__'); }catch(_){ crossState.sat={}; }
+  try{ if(s&&s.id) loadPhotosFor(s.id).then(()=>{ if(!(sitePhotos||[]).some(Boolean)) try{ toast('이 발행본엔 저장된 현장사진이 없어요 — 현장사진의 ‘📥 발행 엑셀에서 불러오기’로 되살릴 수 있어요'); }catch(_){} }); }catch(_){}   /* v8.6: 발행본별 현장사진 복원 */   /* ★ 현장별로 저장해둔 위성사진 복원 (없으면 빈 상태) */
   try{ if(typeof satFetchShared==='function' && s && s.id) satFetchShared(s.id); }catch(_){}   /* ★ 팀 공유본 있으면 다른 기기 사진도 불러옴 */
   /* ★ 단가 DB는 스냅샷을 복원하지 않고 '현재 마스터 DB'를 그대로 사용 → 저장된 현장도 항상 최신 단가로 재계산.
      (materialsDB · LABOR · LABOR_WORK · LEDGER_TGT · AREA_FORMULA 는 덮어쓰지 않음) */
@@ -4873,7 +4934,7 @@ function newEstimate(){
   try{ const o=satStoreRead(); delete o['__draft__']; satStoreWrite(o,''); }catch(_){}   /* 새 내역서: 임시 위성사진 정리 */
   /* 안내문구 선택·현장사진 초기화 */
   try{ if(typeof selectedNotices!=='undefined'){ selectedNotices=[]; if(typeof saveNotices==='function') saveNotices(); if(typeof renderNotices==='function') renderNotices(); } }catch(e){}
-  try{ if(typeof sitePhotos!=='undefined'){ sitePhotos=[]; if(typeof savePhotos==='function') savePhotos(); if(typeof renderPhotoGrid==='function') renderPhotoGrid(); } }catch(e){}
+  try{ if(typeof sitePhotos!=='undefined'){ sitePhotos=[]; if(typeof savePhotosTo==='function') savePhotosTo('__draft__'); if(typeof renderPhotoGrid==='function') renderPhotoGrid(); } }catch(e){}   /* v8.6: 새 내역서는 임시칸만 비움 — 발행본 사진은 그대로 */
   /* 입력 필드 비우기 */
   ['client','project','requester','siteAddr','totalDong','reviewAddNotes','reviewDue'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
   ['pc_raise','pc_small','pc_received'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value='0'; });
@@ -4908,8 +4969,11 @@ function issueReport(){
   const prev=h.filter(x=>(x.meta.client||x.meta.site)===site).reduce((m,x)=>Math.max(m,x.meta.issueNo||0),0);
   snap.meta.issueNo=prev+1; snap.meta.issuedAt=new Date().toISOString(); snap.id='rpt_'+Date.now();
   h.unshift(snap); saveHistory(h);
-  const prevKey=currentSatKey(); loadedReportId=snap.id;
+  const prevKey=currentSatKey();
+  try{ if(!Object.keys(crossState.sat||{}).length){ const d0=satStoreRead()[prevKey]; if(d0&&d0.sat) crossState.sat=Object.assign({}, d0.sat); } }catch(_){}   /* v8.6: 화면에 안 불러온 임시 위성사진도 발행본으로 같이 옮김(지워지지 않게) */
+  loadedReportId=snap.id;
   try{ satImagesPersist(); if(prevKey==='__draft__'){ const o=satStoreRead(); delete o['__draft__']; satStoreWrite(o, snap.id); } }catch(_){}   /* ★ 발행한 현장에 위성사진 귀속 */
+  try{ savePhotosTo(snap.id); }catch(_){}   /* v8.6: 현장사진도 이 발행본에 저장 → 발행이력에서 다시 열어도 유지 */
   try{ if(typeof satShareAll==='function') satShareAll(); }catch(_){}   /* ★ 팀 공유 연결 시 발행과 함께 위성사진 공유 */
   renderBanner(); renderHistory();
   alert('발행 완료 — '+site+' '+snap.meta.issueNo+'회차로 발행이력에 저장되었습니다.');
@@ -4947,7 +5011,7 @@ function koNum(n){
   }
   return res;
 }
-const NF_XL_VER='POUR내역서 v8.4 (전 시트 수식 연결·산출식 표시)';
+const NF_XL_VER='POUR내역서 v8.5 (전 시트 수식 연결)';
 /* v8.4: 산출근거 '산출식' 글자 — 엑셀 수식을 사람이 읽기 쉽게: ((463.92+(341.28*0.1))*1.05) → (463.92 + 341.28×0.1) × 1.05 */
 function nfPrettyF(f){
   let x=String(f||'').replace(/^=/,'').replace(/\s+/g,'');
@@ -5068,8 +5132,8 @@ async function buildConsultingWorkbook(d){
   cov.mergeCells('B12:N12'); cv('B12','▶ 공사 범위 : '+scopeFinal,{size:10}); cov.getRow(12).height=21;
   /* 실행가 설정 근거 박스 */
   cov.mergeCells('B13:N13'); cv('B13','실행가 설정 근거',{size:12,bold:true,al:'center'}); cov.getRow(13).height=18;
-  let rw=14;
-  used.forEach((w,i)=>{ const unit=w.qty?Math.round(w.sum/w.qty):0;
+  let rw=14; const covUnitRow={};   /* v8.6: 공법별 실행가 칸 — 일위대가표 소계 합계단가(L)를 참조하도록 아래에서 연결 */
+  used.forEach((w,i)=>{ const unit=w.qty?Math.round(w.sum/w.qty):0; covUnitRow[w.key]={r:rw, v:unit};
     cov.mergeCells('B'+rw+':E'+rw); cv('B'+rw,(i+1)+'. '+w.name.replace(/^[0-9]+\.\s*/,'')+' 실행가',{size:10,bold:true});
     cv('F'+rw,'1m² =',{size:10,bold:true,al:'right'}); cv('G'+rw,unit,{size:10,bold:true,al:'right',fmt:FMT});
     cov.mergeCells('H'+rw+':N'+rw); cov.getRow(rw).height=13.5; rw++;
@@ -5218,6 +5282,11 @@ async function buildConsultingWorkbook(d){
   frame(led,lTop,1,lr-1,13); led.views=[{state:'frozen',ySplit:lTop+1}]; applyFont(led);
   /* v7.8: 일위대가표 시트 보호 제거 — 보호 시 일부 뷰어(미리보기·모바일·구글시트)에서 내용이 빈 것처럼 보이는 문제 해결. 원본 파일도 보호 없음 */
 
+  /* v8.6: 안내사항 실행가(㎡당) = 일위대가표 소계 합계단가 → 일위대가 단가를 바꾸면 안내사항도 같이 바뀜 */
+  try{ Object.keys(covUnitRow).forEach(k=>{ const rows=ledRows[k]; if(!rows||!rows.length) return; const sub=rows[rows.length-1]+1;
+      if(String(led.getCell(sub,1).value||'').replace(/\s/g,'')!=='소계') return;
+      const lv=led.getCell(sub,12).value; const lres=(lv&&typeof lv==='object')?lv.result:lv;
+      const cu=covUnitRow[k]; if(typeof lres==='number' && Math.abs(lres-cu.v)<0.5){ const g=cov.getCell(cu.r,7); g.value={formula:"'일위대가표'!L"+sub, result:cu.v}; } }); }catch(e){ console.warn('[실행가 연결]',e); }
   /* 5) 산출내역서 */
   const det=wb.addWorksheet('산출내역서'); setWidths(det); wide(det);
   title(det,'산 출 내 역 서');
@@ -5265,7 +5334,8 @@ async function buildConsultingWorkbook(d){
   }
   const etcItems=[].concat(
     d.unitItems.map(u=>({n:u.label,s:'',u:u.u,q:u.qty,p:u.price,amt:u.amt,cid:u.id})),
-    d.extraItems.map(e=>({n:e.n,s:e.s||'',u:e.u||'식',q:e.q,p:e.p,amt:e.amt,
+    d.extraItems.map(e=>({n:e.n,s:((e.preset==='base' && !e.manualQ && num(e.pct)>0) ? ((e.baseWork&&e.baseWork!=='all') ? (({shingle:'싱글',metal:'금속기와',dual:'슬라브',drain:'배수로',pvc:'PVC',metalpaint:'박공지붕도장'}[e.baseWork])||e.baseWork) : '전체') + ' ' + num(e.pct) + '%' + (e.inclRoof===false?' (옥탑 제외)':'') : (e.s||'')),   /* v8.6: 바탕정리 규격 = 기준 공법 + 비율 (예: 배수로 10%) */
+      u:e.u||'식',q:e.q,p:e.p,amt:e.amt,
       note:(e.preset==='base') ? (String(e.note||'몰탈미포함').replace(/^몰탈포함$/,'몰탈 포함').replace(/^몰탈미포함$/,'몰탈 미포함')) : (e.note||'')}))   /* v7.9: 비고 — 바탕정리 몰탈 포함/미포함 */
   ).filter(x=>x.amt>0||x.q>0);
   if(etcItems.length){
@@ -5324,9 +5394,9 @@ async function buildConsultingWorkbook(d){
   if(!qCols.length) qCols.push({label:'물량', sur:0, get:()=>0, fx:()=>({f:null,v:0})});
   const nC=qCols.length, LC=nC+1;   /* 표 마지막 열 */
   /* 오른쪽에 산출근거를 나란히 두기 위한 열 배치: 좌(1..LC) | 간격 | 우(RC0..RC0+1) */
-  const RC0=LC+2, LASTCOL=RC0+2;   /* v8.4: 산출근거 = 동 | 물량 | 산출식 */
+  const RC0=LC+2, LASTCOL=RC0+1;   /* 산출근거 = 동 | 물량 (물량 칸에 산식 — 칸 누르면 계산식 보임) */
   qsheet.getColumn(1).width=16; for(let i=0;i<nC;i++) qsheet.getColumn(i+2).width=16;
-  qsheet.getColumn(LC+1).width=2.6; qsheet.getColumn(RC0).width=12; qsheet.getColumn(RC0+1).width=15; qsheet.getColumn(RC0+2).width=30;
+  qsheet.getColumn(LC+1).width=2.6; qsheet.getColumn(RC0).width=12; qsheet.getColumn(RC0+1).width=15;
   const fillRow=(r,c1,c2,argb)=>{ for(let c=c1;c<=c2;c++) qsheet.getCell(r,c).fill={type:'pattern',pattern:'solid',fgColor:{argb:argb||LIGHT}}; };
   qsheet.mergeCells(1,1,1,LASTCOL); const qt=qsheet.getCell(1,1); qt.value='물 량 산 출 내 역 서'; qt.font={name:FONT,bold:true,size:20}; qt.alignment={horizontal:'center',vertical:'middle'}; qsheet.getRow(1).height=34;
   qsheet.getCell('A2').value='단지명 :'; qsheet.getCell('A2').font={name:FONT,bold:true,size:11}; qsheet.getCell('B2').value=clientName; qsheet.getCell('B2').font={name:FONT,size:11}; qsheet.getRow(2).height=20;
@@ -5380,19 +5450,18 @@ async function buildConsultingWorkbook(d){
   const leftBottom=R;
   /* 산출근거 — 기본·할증 표의 '오른쪽'에 배치 (아래로 길게 이어지지 않게) */
   let RR=topRow;
-  qsheet.mergeCells(RR,RC0,RR,RC0+2); const sb=qsheet.getCell(RR,RC0); sb.value='산 출 근 거'; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+2,'FFCFE9E3'); qsheet.getRow(RR).height=22; frame(qsheet,RR,RC0,RR,RC0+2); RR++;
+  qsheet.mergeCells(RR,RC0,RR,RC0+1); const sb=qsheet.getCell(RR,RC0); sb.value='산 출 근 거'; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+1,'FFCFE9E3'); qsheet.getRow(RR).height=22; frame(qsheet,RR,RC0,RR,RC0+1); RR++;
   qCols.forEach(col=>{
     const top=RR;
-    qsheet.mergeCells(RR,RC0,RR,RC0+2); const h=qsheet.getCell(RR,RC0); h.value=col.label; h.font={name:FONT,bold:true,size:11,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+2,'FFEAF3F0'); qsheet.getRow(RR).height=20; RR++;
-    const d1=qsheet.getCell(RR,RC0); d1.value='동'; const d2=qsheet.getCell(RR,RC0+1); d2.value='물량(㎡)'; const d3=qsheet.getCell(RR,RC0+2); d3.value='산출식'; [d1,d2,d3].forEach(cc=>{ cc.font={name:FONT,bold:true,size:10}; cc.alignment={horizontal:'center',vertical:'middle'}; }); fillRow(RR,RC0,RC0+2); qsheet.getRow(RR).height=19; RR++;
+    qsheet.mergeCells(RR,RC0,RR,RC0+1); const h=qsheet.getCell(RR,RC0); h.value=col.label; h.font={name:FONT,bold:true,size:11,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+1,'FFEAF3F0'); qsheet.getRow(RR).height=20; RR++;
+    const d1=qsheet.getCell(RR,RC0); d1.value='동'; const d2=qsheet.getCell(RR,RC0+1); d2.value='물량(㎡)'; [d1,d2].forEach(cc=>{ cc.font={name:FONT,bold:true,size:10}; cc.alignment={horizontal:'center',vertical:'middle'}; }); fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=19; RR++;
     const rTop=RR;
     const ci=qCols.indexOf(col);
     EBq.forEach((b,bi)=>{ const nc=qsheet.getCell(RR,RC0); nc.value=b.name; nc.alignment={horizontal:'center',vertical:'middle'}; nc.font={name:FONT,size:10}; const vc=qsheet.getCell(RR,RC0+1); const gv=col.get(b); const rf=col.fx(b); vc.value=(rf.f && baseHasExpr[bi+'_'+ci]) ? {formula:rf.f, result:rf.v} : gv;   /* v8.4: 산식 있는 동은 산식 그대로(칸 누르면 계산식 보임), 숫자 입력 동은 여기가 입력칸 */
-      const tc=qsheet.getCell(RR,RC0+2); tc.value=(rf.f && baseHasExpr[bi+'_'+ci]) ? nfPrettyF(rf.f) : ''; tc.alignment={horizontal:'left',vertical:'middle',indent:1}; tc.font={name:FONT,size:10,color:{argb:'FF475569'}};   /* v8.4: 산출식 글자로 표시 — 업체가 계산 방법을 바로 보게 */
       vc.numFmt=FMT_Q3; vc.alignment={horizontal:'right',vertical:'middle'}; vc.font={name:FONT,size:10}; qsheet.getRow(RR).height=18; RR++; });
     const rBot=RR-1, rL=colLetter(RC0+1), rSum=EBq.reduce((s,b)=>s+col.get(b),0);
-    const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'}; const tv=qsheet.getCell(RR,RC0+1); tv.value=(rBot>=rTop)?{formula:'SUM('+rL+rTop+':'+rL+rBot+')', result:rSum}:rSum;   /* v7.9: 산출근거 합계도 SUM 수식 */ tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+2); qsheet.getRow(RR).height=20;
-    frame(qsheet,top,RC0,RR,RC0+2); RR+=2;
+    const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'}; const tv=qsheet.getCell(RR,RC0+1); tv.value=(rBot>=rTop)?{formula:'SUM('+rL+rTop+':'+rL+rBot+')', result:rSum}:rSum;   /* v7.9: 산출근거 합계도 SUM 수식 */ tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=20;
+    frame(qsheet,top,RC0,RR,RC0+1); RR+=2;
   });
   R=Math.max(leftBottom, RR)+1;
   /* v7.9: 산출내역서 수량 = 물량산출내역서 '할증 후 전체' 합(+뻐꾸기창) → 물량 바꾸면 산출내역서·집계표·원가계산서까지 자동 연동 */
@@ -6922,10 +6991,13 @@ function nfMailDialog(r,f0){
   $1('mlCancel').onclick=close; w.addEventListener('click',e=>{ if(e.target===w) close(); });
   $1('mlSet').onclick=(e)=>{ e.preventDefault(); if(nfMailSetup()){ const c2=nfMailCfg(); $1('mlNote').textContent=(c2.url&&c2.key)?'':'⚠ 주소와 키를 모두 넣어주세요'; } };
   let mailUpLinks=[];
-  const saveCard=async(logText)=>{ r.mailTo=$1('mlTo').value.trim(); r.mailCc=$1('mlCc').value.trim(); if(!r.scope && $1('mlScope').value.trim()) r.scope=$1('mlScope').value.trim();
+  const saveCard=async(logText)=>{
+    /* v8.6: 발송하는 동안(큰 첨부 업로드 등) 팀 동기화로 카드가 새로 받아졌을 수 있음 → 지금 목록의 카드를 다시 찾아서 기록 (발송 기록이 안 남던 문제) */
+    const cur=reviews.find(x=>x.id===r.id)||r;
+    cur.mailTo=$1('mlTo').value.trim(); cur.mailCc=$1('mlCc').value.trim(); if(!cur.scope && $1('mlScope').value.trim()) cur.scope=$1('mlScope').value.trim();
     const who=$1('mlWho').value||lastAuthor||'(미입력)';
-    r.comments=r.comments||[]; r.comments.push({id:'c'+Date.now()+rand(), author:who, ts:new Date().toISOString(), text:logText, links:mailUpLinks.slice()});
-    await save(); renderDetail(); render(); };
+    cur.comments=cur.comments||[]; cur.comments.push({id:'c'+Date.now()+rand(), author:who, ts:new Date().toISOString(), text:logText, links:mailUpLinks.slice()});
+    await save(); try{ renderDetail(); }catch(_){} render(); };
   $1('mlManual').onclick=async()=>{
     const tidy=v=>String(v||'').split(/[,;]/).map(x=>x.trim()).filter(Boolean).join(', '); $1('mlTo').value=tidy($1('mlTo').value); $1('mlCc').value=tidy($1('mlCc').value);
     atts.forEach(a=>{ try{ if(a.f) nfDownloadFile(a.f); }catch(_){} });
@@ -7586,7 +7658,7 @@ async function nfUpgradeEstimateXlsx(buf){
         if(String(val(v)||'').trim()===t && typeof val(v)==='string'){ curLbl=t; continue; }   /* 소제목(열 이름) — 병합칸 */
         if(curLbl) rgMap[curLbl+'|'+t]=q.getColumn(rc+1).letter+r; } }
       const baseHdr=hdrRows[0], surHdr=hdrRows[1];
-      /* v8.4: 산출근거 — 숫자만 있던 칸을 기본물량과 같은 산식으로 + 오른쪽에 '산출식' 글자 (값은 그대로) */
+      /* v8.5: 산출근거 — 숫자만 있던 물량 칸을 기본물량과 같은 산식으로 (칸 누르면 계산식 보임, 값은 그대로) */
       try{ if(rc && baseHdr){
         const secs=[]; let cur=null;
         for(let r=1;r<=q.rowCount;r++){ const t=String(val(q.getCell(r,rc))||'').trim(); const v=q.getCell(r,rc+1);
@@ -7607,13 +7679,13 @@ async function nfUpgradeEstimateXlsx(buf){
           pairs.forEach(([sr,mr])=>{ const m=q.getCell(mr,mc.c), g=q.getCell(sr,rc+1); if(!isF(m)) return; const mf=String(m.value.formula); if(!arith(mf)) return;
             const gv=val(g), mv=val(m); if(typeof gv!=='number'||typeof mv!=='number'||Math.abs(gv-mv)>0.001) return;
             if(!isF(g)){ g.value={formula:mf, result:gv}; added++; }
-            const tc=q.getCell(sr,rc+2); const pt=nfPrettyF(mf); if(pt && (tc.value==null||tc.value==='')){ tc.value=pt; tc.style=Object.assign({},cp(g.style)||{}); tc.numFmt='@'; tc.alignment={horizontal:'left',vertical:'middle',indent:1}; tc.font=Object.assign({},cp(g.font)||{},{color:{argb:'FF475569'}}); any=true; added++; } });
-          if(any){ wrote=true; const hc=q.getCell(sec.hdr,rc+2), h1=q.getCell(sec.hdr,rc+1); if(hc.value==null||hc.value===''){ hc.value='산출식'; hc.style=Object.assign({},cp(h1.style)||{}); }
-            const lc=q.getCell(sec.hdr-1,rc+2); if(lc.value==null||lc.value==='') lc.style=Object.assign({},cp(q.getCell(sec.hdr-1,rc+1).style)||{});   /* 소제목 줄 배경도 이어서 */
-            /* 빈 줄(0·없는 옥탑)·합계 줄도 테두리·배경 맞춤 */
-            for(let r=sec.hdr+1;r<=q.rowCount;r++){ const t=String(val(q.getCell(r,rc))||'').trim(); const x=q.getCell(r,rc+2); if(x.value==null||x.value===''){ x.style=Object.assign({},cp(q.getCell(r,rc+1).style)||{}); } if(t==='합계') break; } } });
-        if(wrote){ const col=q.getColumn(rc+2); if(!col.width||col.width<26) col.width=30;
-          for(let r=1;r<=Math.min(q.rowCount,10);r++){ if(String(val(q.getCell(r,rc))||'').replace(/\s/g,'')==='산출근거'){ const x=q.getCell(r,rc+2); if(x.value==null||x.value==='') x.style=Object.assign({},cp(q.getCell(r,rc+1).style)||{}); break; } } }
+            any=true; });
+          if(any) wrote=true; });
+        /* v8.5: 예전 업데이트(v8.4)로 생긴 오른쪽 '산출식' 글자 칸은 지움 — 산식은 물량 칸 안에만 */
+        secs.forEach(sec=>{ if(!sec.hdr) return; const hc=q.getCell(sec.hdr,rc+2); if(String(val(hc)||'').trim()!=='산출식') return;
+          for(let r=sec.hdr-1;r<=q.rowCount;r++){ const t=String(val(q.getCell(r,rc))||'').trim(); const x=q.getCell(r,rc+2); x.value=null; x.style={}; added++; if(t==='합계') break; }
+          try{ q.getColumn(rc+2).width=9; }catch(_){} });
+        for(let r=1;r<=Math.min(q.rowCount,10);r++){ if(String(val(q.getCell(r,rc))||'').replace(/\s/g,'')==='산출근거'){ const x=q.getCell(r,rc+2); if(x.value==null||x.value==='') x.style={}; break; } }
       } }catch(e){ console.warn('[산출근거 산식]',e); }
       const colInfo=[];   /* {c, label, sur, surTot} */
       if(baseHdr){ for(let c=2;c<(rc||30);c++){ const h=String(val(q.getCell(baseHdr,c))||'').trim(); if(!h) break; colInfo.push({c, label:h.replace(/\s*\(㎡\)\s*$/,'').trim()}); }
@@ -7969,6 +8041,9 @@ fillStageSelect();
 
 window.NF_DASH = {
   /* v7.9: 같은 현장 카드 찾기 — 내역서 수정본을 기존 카드 댓글로 재발행할 때 */
+  /* v8.6: 현장 카드의 최신 내역서 엑셀(드라이브·공유DB) 바이트 — 현장사진 복구용 */
+  latestXlsx: async function(site){ const c=(this.findCards(site)||[])[0]; if(!c) return null; const r=reviews.find(x=>x.id===c.id); if(!r) return null;
+    const p=nfLatestPos(r,nfIsXls); if(!p) return null; return {name:p.l.name, site:r.site, buf:await nfFileBytes(p.l)}; },
   findCards: function(site){ try{ const nz=x=>String(x||'').replace(/\s+/g,'').toLowerCase(); const k=nz(site); if(!k) return [];
       const STOP=['아파트','apt','단지','마을','지구','현장'];
       const toks=x=>String(x||'').toLowerCase().split(/[\s,·_()\-]+/).map(t=>t.trim()).filter(t=>t.length>=2 && STOP.indexOf(t)<0);
@@ -8054,7 +8129,7 @@ function nfReissueDialog(site, cards, autoNotes, forced){
       +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
         +'<div style="flex:2;min-width:180px;"><label style="display:block;font-weight:600;margin-bottom:4px;">재발행 종류</label><select id="rsType" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;">'+TYPES.map((t,i)=>'<option value="'+i+'">'+t[0]+'</option>').join('')+'</select></div>'
         +'<div style="flex:1;min-width:90px;"><label style="display:block;font-weight:600;margin-bottom:4px;">단계</label><select id="rsStage" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;"><option>초안본</option><option>최종본</option></select></div>'
-        +'<div style="flex:1;min-width:80px;"><label style="display:block;font-weight:600;margin-bottom:4px;">차수</label><input id="rsNo" type="number" min="1" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;"></div>'
+        +'<div style="flex:1;min-width:80px;"><label style="display:block;font-weight:600;margin-bottom:4px;">차수 <span style="font-weight:400;color:#768194;font-size:11px;">0=차수 없음</span></label><input id="rsNo" type="number" min="0" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;"></div>'
         +'<div style="flex:1;min-width:110px;"><label style="display:block;font-weight:600;margin-bottom:4px;">작성자</label><select id="rsAuthor" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;">'+[''].concat(team).map(n=>'<option'+(n===la?' selected':'')+' value="'+esc1(n)+'">'+(n||'선택')+'</option>').join('')+'</select></div>'
       +'</div>'
       +'<div id="rsFile" style="margin-top:8px;font-size:12px;color:#768194;"></div>'
@@ -8070,7 +8145,7 @@ function nfReissueDialog(site, cards, autoNotes, forced){
     document.body.appendChild(w);
     const $1=id=>document.getElementById(id);
     const sync=()=>{ const c=cards.find(x=>x.id===$1('rsCard').value)||c0; $1('rsStage').value=stageOf(c); $1('rsNo').value=String((c.nX||0)+1); prev(); };
-    const prev=()=>{ const st=$1('rsStage').value, no=$1('rsNo').value||'1'; let nm=''; try{ const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo'); const o=[fs&&fs.value,fk&&fk.value,fn&&fn.value]; if(fs)fs.value=st; if(fk)fk.value='차'; if(fn)fn.value=no; nm=buildEstimateFileName()+'.xlsx'; if(fs)fs.value=o[0]; if(fk)fk.value=o[1]; if(fn)fn.value=o[2]; }catch(_){}
+    const prev=()=>{ const st=$1('rsStage').value, no=($1('rsNo').value===''?'1':$1('rsNo').value); let nm=''; try{ const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo'); const o=[fs&&fs.value,fk&&fk.value,fn&&fn.value]; if(fs)fs.value=st; if(fk)fk.value=(parseInt(no,10)===0?'':'차');   /* v8.6: 0차 = '초안본'/'최종본' 그대로 */ if(fn)fn.value=no; nm=buildEstimateFileName()+'.xlsx'; if(fs)fs.value=o[0]; if(fk)fk.value=o[1]; if(fn)fn.value=o[2]; }catch(_){}
       $1('rsFile').innerHTML='올라갈 파일: <b style="color:#1E9E5A;">'+esc1(nm)+'</b>'; };
     $1('rsCard').onchange=sync; $1('rsStage').onchange=prev; $1('rsNo').oninput=prev; sync();
     if($1('rsFind')) $1('rsFind').oninput=()=>{ const k=$1('rsFind').value.replace(/\s/g,'').toLowerCase(); const sel=$1('rsCard'); let first=null;
@@ -8080,8 +8155,8 @@ function nfReissueDialog(site, cards, autoNotes, forced){
     $1('rsCancel').onclick=()=>close('cancel'); $1('rsNew').onclick=()=>close('new');
     w.addEventListener('click',e=>{ if(e.target===w) close('cancel'); });
     $1('rsGo').onclick=()=>{
-      const ti=TYPES[+$1('rsType').value]||TYPES[0], no=Math.max(1,parseInt($1('rsNo').value,10)||1), st=$1('rsStage').value;
-      const title=(ti[1].replace('{n}',no)).replace(/^수정본/, st);
+      const ti=TYPES[+$1('rsType').value]||TYPES[0], no=(function(v){ const n=parseInt(v,10); return isNaN(n)?1:Math.max(0,n); })($1('rsNo').value), st=$1('rsStage').value;
+      const title=(no===0 ? ti[1].replace(/\s*\(\{n\}차\)/,'').replace(/\s*\{n\}차/,'') : ti[1].replace('{n}',no)).replace(/^수정본/, st);   /* v8.6: 0 → 차수 표기 없이 */
       let body=($1('rsText').value||'').split('\n').filter(l=>l.replace(/^[-•·]\s*[^:：]*[:：]\s*$/,'').trim()!=='' || !/[:：]\s*$/.test(l)).join('\n').trim();
       if($1('rsAuto') && $1('rsAuto').checked && autoNotes) body=(body?body+'\n':'')+autoNotes;
       close({mode:'revise', id:$1('rsCard').value, stage:st, no:no, author:$1('rsAuthor').value, title:title, reopen:$1('rsReopen').checked, text:'['+title+']'+(body?'\n'+body:'')});
@@ -8133,7 +8208,7 @@ window.sendToReviewBoard = async function(forceRevise){
         if(choice==='cancel') return;
         if(choice && choice.mode==='revise'){
           const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo');
-          if(fs) fs.value=choice.stage; if(fk) fk.value='차'; if(fn) fn.value=String(choice.no); try{ fnPreview(); }catch(_){}
+          if(fs) fs.value=choice.stage; if(fk) fk.value=(choice.no===0?'':'차'); if(fn) fn.value=String(choice.no||1); try{ fnPreview(); }catch(_){}
           const fname2=buildEstimateFileName()+'.xlsx';
           const dataUrl2=await buildEstimateDataURL();
           await window.NF_DASH.addRevision({ id:choice.id, author:choice.author, text:choice.text, title:choice.title, reopen:choice.reopen, fileName:fname2, fileDataUrl:dataUrl2, finalAmt, rates });
