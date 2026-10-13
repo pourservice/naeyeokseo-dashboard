@@ -4928,7 +4928,17 @@ function koNum(n){
   }
   return res;
 }
-const NF_XL_VER='POUR내역서 v8.2 (전 시트 수식 연결)';
+const NF_XL_VER='POUR내역서 v8.4 (전 시트 수식 연결·산출식 표시)';
+/* v8.4: 산출근거 '산출식' 글자 — 엑셀 수식을 사람이 읽기 쉽게: ((463.92+(341.28*0.1))*1.05) → (463.92 + 341.28×0.1) × 1.05 */
+function nfPrettyF(f){
+  let x=String(f||'').replace(/^=/,'').replace(/\s+/g,'');
+  const encl=t=>{ if(!/^\(.*\)$/.test(t)) return false; let d=0; for(let i=0;i<t.length;i++){ if(t[i]==='(')d++; else if(t[i]===')'){ d--; if(d===0&&i<t.length-1) return false; } } return true; };
+  while(encl(x)) x=x.slice(1,-1);
+  for(let k=0;k<3;k++) x=x.replace(/\((\d+(?:\.\d+)?(?:\*\d+(?:\.\d+)?)?)\)/g,'$1');
+  while(encl(x)) x=x.slice(1,-1);
+  if(!/[+\-*/]/.test(x)) return '';   /* 숫자 하나뿐이면 산출식 생략 */
+  return x.replace(/\)\*/g,') × ').replace(/\*\(/g,' × (').replace(/\*/g,'×').replace(/\+/g,' + ').replace(/-/g,' - ').replace(/\//g,' ÷ ');
+}
 async function buildConsultingWorkbook(d){
   const EJS=(typeof ExcelJS!=='undefined')?ExcelJS:require('exceljs');
   const wb=new EJS.Workbook(); wb.creator='넷폼'; wb.subject=NF_XL_VER; wb.keywords=NF_XL_VER;   /* 파일 속성에 생성 버전 기록 — 어느 버전으로 만든 파일인지 확인용 */
@@ -5251,6 +5261,7 @@ async function buildConsultingWorkbook(d){
     const eBot=dr-1;
     subRow(det,dr,'소      계',null,null,etcExp,etcExp);
     if(eBot>=eTop) [[10,etcExp],[12,etcExp]].forEach(a=>setF(det,dr,a[0],'SUM('+L_[a[0]]+eTop+':'+L_[a[0]]+eBot+')',a[1]));
+    if(eBot>=eTop) [9,11].forEach(c=>{ let sm=0; for(let rr=eTop;rr<=eBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+eTop+':'+L_[c]+eBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.3: 기타공사 소계도 단가 합계(경비·합계) */
     detEtcSub=dr; detSubCells.push(dr); dr++;
   }
   subRow(det,dr,'합      계',d.matTotal,d.labTotal,d.expTotal,d.directSum);
@@ -5294,9 +5305,9 @@ async function buildConsultingWorkbook(d){
   if(!qCols.length) qCols.push({label:'물량', sur:0, get:()=>0, fx:()=>({f:null,v:0})});
   const nC=qCols.length, LC=nC+1;   /* 표 마지막 열 */
   /* 오른쪽에 산출근거를 나란히 두기 위한 열 배치: 좌(1..LC) | 간격 | 우(RC0..RC0+1) */
-  const RC0=LC+2, LASTCOL=RC0+1;
+  const RC0=LC+2, LASTCOL=RC0+2;   /* v8.4: 산출근거 = 동 | 물량 | 산출식 */
   qsheet.getColumn(1).width=16; for(let i=0;i<nC;i++) qsheet.getColumn(i+2).width=16;
-  qsheet.getColumn(LC+1).width=2.6; qsheet.getColumn(RC0).width=12; qsheet.getColumn(RC0+1).width=15;
+  qsheet.getColumn(LC+1).width=2.6; qsheet.getColumn(RC0).width=12; qsheet.getColumn(RC0+1).width=15; qsheet.getColumn(RC0+2).width=30;
   const fillRow=(r,c1,c2,argb)=>{ for(let c=c1;c<=c2;c++) qsheet.getCell(r,c).fill={type:'pattern',pattern:'solid',fgColor:{argb:argb||LIGHT}}; };
   qsheet.mergeCells(1,1,1,LASTCOL); const qt=qsheet.getCell(1,1); qt.value='물 량 산 출 내 역 서'; qt.font={name:FONT,bold:true,size:20}; qt.alignment={horizontal:'center',vertical:'middle'}; qsheet.getRow(1).height=34;
   qsheet.getCell('A2').value='단지명 :'; qsheet.getCell('A2').font={name:FONT,bold:true,size:11}; qsheet.getCell('B2').value=clientName; qsheet.getCell('B2').font={name:FONT,size:11}; qsheet.getRow(2).height=20;
@@ -5350,17 +5361,19 @@ async function buildConsultingWorkbook(d){
   const leftBottom=R;
   /* 산출근거 — 기본·할증 표의 '오른쪽'에 배치 (아래로 길게 이어지지 않게) */
   let RR=topRow;
-  qsheet.mergeCells(RR,RC0,RR,RC0+1); const sb=qsheet.getCell(RR,RC0); sb.value='산 출 근 거'; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+1,'FFCFE9E3'); qsheet.getRow(RR).height=22; frame(qsheet,RR,RC0,RR,RC0+1); RR++;
+  qsheet.mergeCells(RR,RC0,RR,RC0+2); const sb=qsheet.getCell(RR,RC0); sb.value='산 출 근 거'; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+2,'FFCFE9E3'); qsheet.getRow(RR).height=22; frame(qsheet,RR,RC0,RR,RC0+2); RR++;
   qCols.forEach(col=>{
     const top=RR;
-    qsheet.mergeCells(RR,RC0,RR,RC0+1); const h=qsheet.getCell(RR,RC0); h.value=col.label; h.font={name:FONT,bold:true,size:11,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+1,'FFEAF3F0'); qsheet.getRow(RR).height=20; RR++;
-    const d1=qsheet.getCell(RR,RC0); d1.value='동'; const d2=qsheet.getCell(RR,RC0+1); d2.value='물량(㎡)'; [d1,d2].forEach(cc=>{ cc.font={name:FONT,bold:true,size:10}; cc.alignment={horizontal:'center',vertical:'middle'}; }); fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=19; RR++;
+    qsheet.mergeCells(RR,RC0,RR,RC0+2); const h=qsheet.getCell(RR,RC0); h.value=col.label; h.font={name:FONT,bold:true,size:11,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+2,'FFEAF3F0'); qsheet.getRow(RR).height=20; RR++;
+    const d1=qsheet.getCell(RR,RC0); d1.value='동'; const d2=qsheet.getCell(RR,RC0+1); d2.value='물량(㎡)'; const d3=qsheet.getCell(RR,RC0+2); d3.value='산출식'; [d1,d2,d3].forEach(cc=>{ cc.font={name:FONT,bold:true,size:10}; cc.alignment={horizontal:'center',vertical:'middle'}; }); fillRow(RR,RC0,RC0+2); qsheet.getRow(RR).height=19; RR++;
     const rTop=RR;
     const ci=qCols.indexOf(col);
-    EBq.forEach((b,bi)=>{ const nc=qsheet.getCell(RR,RC0); nc.value=b.name; nc.alignment={horizontal:'center',vertical:'middle'}; nc.font={name:FONT,size:10}; const vc=qsheet.getCell(RR,RC0+1); const gv=col.get(b); vc.value=(baseHasExpr[bi+'_'+ci] && baseAddr[bi+'_'+ci]) ? {formula:baseAddr[bi+'_'+ci], result:gv} : gv;   /* v7.9: 산식 있는 동은 기본물량 칸 참조, 숫자 입력 동은 여기가 입력칸 */ vc.numFmt=FMT_Q3; vc.alignment={horizontal:'right',vertical:'middle'}; vc.font={name:FONT,size:10}; qsheet.getRow(RR).height=18; RR++; });
+    EBq.forEach((b,bi)=>{ const nc=qsheet.getCell(RR,RC0); nc.value=b.name; nc.alignment={horizontal:'center',vertical:'middle'}; nc.font={name:FONT,size:10}; const vc=qsheet.getCell(RR,RC0+1); const gv=col.get(b); const rf=col.fx(b); vc.value=(rf.f && baseHasExpr[bi+'_'+ci]) ? {formula:rf.f, result:rf.v} : gv;   /* v8.4: 산식 있는 동은 산식 그대로(칸 누르면 계산식 보임), 숫자 입력 동은 여기가 입력칸 */
+      const tc=qsheet.getCell(RR,RC0+2); tc.value=(rf.f && baseHasExpr[bi+'_'+ci]) ? nfPrettyF(rf.f) : ''; tc.alignment={horizontal:'left',vertical:'middle',indent:1}; tc.font={name:FONT,size:10,color:{argb:'FF475569'}};   /* v8.4: 산출식 글자로 표시 — 업체가 계산 방법을 바로 보게 */
+      vc.numFmt=FMT_Q3; vc.alignment={horizontal:'right',vertical:'middle'}; vc.font={name:FONT,size:10}; qsheet.getRow(RR).height=18; RR++; });
     const rBot=RR-1, rL=colLetter(RC0+1), rSum=EBq.reduce((s,b)=>s+col.get(b),0);
-    const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'}; const tv=qsheet.getCell(RR,RC0+1); tv.value=(rBot>=rTop)?{formula:'SUM('+rL+rTop+':'+rL+rBot+')', result:rSum}:rSum;   /* v7.9: 산출근거 합계도 SUM 수식 */ tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=20;
-    frame(qsheet,top,RC0,RR,RC0+1); RR+=2;
+    const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'}; const tv=qsheet.getCell(RR,RC0+1); tv.value=(rBot>=rTop)?{formula:'SUM('+rL+rTop+':'+rL+rBot+')', result:rSum}:rSum;   /* v7.9: 산출근거 합계도 SUM 수식 */ tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+2); qsheet.getRow(RR).height=20;
+    frame(qsheet,top,RC0,RR,RC0+2); RR+=2;
   });
   R=Math.max(leftBottom, RR)+1;
   /* v7.9: 산출내역서 수량 = 물량산출내역서 '할증 후 전체' 합(+뻐꾸기창) → 물량 바꾸면 산출내역서·집계표·원가계산서까지 자동 연동 */
@@ -7471,7 +7484,7 @@ async function nfUpgradeEstimateXlsx(buf){
   const subRows={};
   ['산출내역서','일위대가표'].forEach(name=>{ const ws=wb.getWorksheet(name); if(!ws) return; let top=null, total=null; const subs=[];
     for(let r=4;r<=ws.rowCount;r++){ const a=lab(ws,r);
-      if(/^\d+\./.test(a)){ top=r+1; continue; }
+      if(/^\d+(-\d+)?\./.test(a)){ top=r+1; continue; }
       if(a==='소계'){ if(top!=null&&r-1>=top) [6,8,10,12].forEach(c=>setF(ws,r,c,'SUM('+L[c]+top+':'+L[c]+(r-1)+')',sumCol(ws,c,top,r-1))); subs.push(r); top=null; continue; }
       if(a==='합계'){ total=r; continue; }
       if(top!=null && name==='산출내역서' && num(ws,r,4)!=null){ const q=num(ws,r,4);
@@ -7504,7 +7517,7 @@ async function nfUpgradeEstimateXlsx(buf){
     const ledSecs={};   /* 공종 이름 → 항목 행 목록 */
     if(led){ let cur=null;
       for(let r=4;r<=led.rowCount;r++){ const a=lab(led,r);
-        if(/^\d+\./.test(a)){ cur={name:a.replace(/^\d+\.?\s*/,''), rows:[]}; ledSecs[cur.name]=cur; continue; }
+        if(/^\d+(-\d+)?\./.test(a)){ cur={name:a.replace(/^\d+(-\d+)?\.?\s*/,''), rows:[]}; ledSecs[cur.name]=cur; continue; }
         if(a==='소계'||a==='합계'){ cur=null; continue; }
         if(cur) cur.rows.push(r); }
       Object.keys(ledSecs).forEach(k=>{ const rows=ledSecs[k].rows;
@@ -7539,8 +7552,8 @@ async function nfUpgradeEstimateXlsx(buf){
         if(ls && num(det,sec.hdr,4)!=null) setF(det,r,4,'$D$'+sec.hdr, num(det,sec.hdr,4));
       });
       /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) — 빈 칸일 때만 */
-      if(ls && sec.rows.length){ const top=sec.rows[0], bot=sec.rows[sec.rows.length-1], sr=bot+1;
-        if(lab(det,sr)==='소계') [5,7,9,11].forEach(c=>{ const cl=det.getCell(sr,c); if(cl.value!=null && cl.value!=='') return; let sm=0; for(let rr=top;rr<=bot;rr++){ sm+=(num(det,rr,c)||0); } cl.value={formula:'SUM('+L[c]+top+':'+L[c]+bot+')', result:sm}; cl.numFmt='#,##0'; cl.alignment={horizontal:'right',vertical:'middle'}; cl.font=Object.assign({},det.getCell(sr,12).font||{}); added++; }); }
+      if(sec.rows.length){ const top=sec.rows[0], bot=sec.rows[sec.rows.length-1], sr=bot+1;
+        if(lab(det,sr)==='소계') [5,7,9,11].forEach(c=>{ const cl=det.getCell(sr,c); if(cl.value!=null && cl.value!=='') return; if(!ls && !sec.rows.some(rr=>num(det,rr,c)!=null)) return; let sm=0; for(let rr=top;rr<=bot;rr++){ sm+=(num(det,rr,c)||0); } cl.value={formula:'SUM('+L[c]+top+':'+L[c]+bot+')', result:sm}; cl.numFmt='#,##0'; cl.alignment={horizontal:'right',vertical:'middle'}; cl.font=Object.assign({},det.getCell(sr,12).font||{}); added++; }); }
     });
     /* (3) 물량산출 — 숫자만 있던 기본물량 칸 → 오른쪽 산출근거 칸 참조 / (4) 산출내역서 공종 수량 → 할증 후 '전체' 참조 */
     if(q){
@@ -7554,6 +7567,35 @@ async function nfUpgradeEstimateXlsx(buf){
         if(String(val(v)||'').trim()===t && typeof val(v)==='string'){ curLbl=t; continue; }   /* 소제목(열 이름) — 병합칸 */
         if(curLbl) rgMap[curLbl+'|'+t]=q.getColumn(rc+1).letter+r; } }
       const baseHdr=hdrRows[0], surHdr=hdrRows[1];
+      /* v8.4: 산출근거 — 숫자만 있던 칸을 기본물량과 같은 산식으로 + 오른쪽에 '산출식' 글자 (값은 그대로) */
+      try{ if(rc && baseHdr){
+        const secs=[]; let cur=null;
+        for(let r=1;r<=q.rowCount;r++){ const t=String(val(q.getCell(r,rc))||'').trim(); const v=q.getCell(r,rc+1);
+          if(!t){ if(cur && cur.hdr && typeof val(v)==='number') cur.rows.push(r); continue; }   /* 동 이름 없는 줄(0)도 순서 맞추려고 포함 */
+          if(t.replace(/\s/g,'')==='산출근거') continue;
+          const nextT=String(val(q.getCell(r+1,rc))||'').trim();
+          if(t!=='동' && t!=='합계' && (nextT==='동' || (String(val(v)||'').trim()===t && typeof val(v)==='string'))){ cur={label:t, hdr:null, rows:[]}; secs.push(cur); continue; }   /* 소제목(열 이름) — 병합 안 된 파일도 다음 줄이 '동'이면 소제목 */
+          if(!cur) continue; if(t==='동'){ cur.hdr=r; continue; } if(t==='합계'){ cur=null; continue; } cur.rows.push(r); }
+        const mRows=[]; for(let r=baseHdr+1;r<=q.rowCount;r++){ const dn=String(val(q.getCell(r,1))||'').trim(); if(!dn||dn==='전체'||dn==='총물량') break; mRows.push(r); }
+        const mCols=[]; for(let c=2;c<rc;c++){ const h=String(val(q.getCell(baseHdr,c))||'').trim(); if(!h) break; mCols.push({c, label:h.replace(/\s*\(㎡\)\s*$/,'').trim()}); }
+        const arith=f=>/^[\d.+\-*/()\s]+$/.test(String(f||''));
+        const cp=o=>o?JSON.parse(JSON.stringify(o)):undefined;
+        let wrote=false;
+        secs.forEach(sec=>{ const mc=mCols.find(m=>m.label===sec.label) || mCols.find(m=>m.label.indexOf(sec.label)>=0||sec.label.indexOf(m.label)>=0); if(!mc||!sec.hdr) return;
+          const pairs=[]; if(sec.rows.length===mRows.length) sec.rows.forEach((sr,i)=>pairs.push([sr,mRows[i]]));
+          else sec.rows.forEach(sr=>{ const nm=String(val(q.getCell(sr,rc))||'').trim(); const mr=mRows.find(r=>String(val(q.getCell(r,1))||'').trim()===nm); if(mr) pairs.push([sr,mr]); });
+          let any=false;
+          pairs.forEach(([sr,mr])=>{ const m=q.getCell(mr,mc.c), g=q.getCell(sr,rc+1); if(!isF(m)) return; const mf=String(m.value.formula); if(!arith(mf)) return;
+            const gv=val(g), mv=val(m); if(typeof gv!=='number'||typeof mv!=='number'||Math.abs(gv-mv)>0.001) return;
+            if(!isF(g)){ g.value={formula:mf, result:gv}; added++; }
+            const tc=q.getCell(sr,rc+2); const pt=nfPrettyF(mf); if(pt && (tc.value==null||tc.value==='')){ tc.value=pt; tc.style=Object.assign({},cp(g.style)||{}); tc.numFmt='@'; tc.alignment={horizontal:'left',vertical:'middle',indent:1}; tc.font=Object.assign({},cp(g.font)||{},{color:{argb:'FF475569'}}); any=true; added++; } });
+          if(any){ wrote=true; const hc=q.getCell(sec.hdr,rc+2), h1=q.getCell(sec.hdr,rc+1); if(hc.value==null||hc.value===''){ hc.value='산출식'; hc.style=Object.assign({},cp(h1.style)||{}); }
+            const lc=q.getCell(sec.hdr-1,rc+2); if(lc.value==null||lc.value==='') lc.style=Object.assign({},cp(q.getCell(sec.hdr-1,rc+1).style)||{});   /* 소제목 줄 배경도 이어서 */
+            /* 빈 줄(0·없는 옥탑)·합계 줄도 테두리·배경 맞춤 */
+            for(let r=sec.hdr+1;r<=q.rowCount;r++){ const t=String(val(q.getCell(r,rc))||'').trim(); const x=q.getCell(r,rc+2); if(x.value==null||x.value===''){ x.style=Object.assign({},cp(q.getCell(r,rc+1).style)||{}); } if(t==='합계') break; } } });
+        if(wrote){ const col=q.getColumn(rc+2); if(!col.width||col.width<26) col.width=30;
+          for(let r=1;r<=Math.min(q.rowCount,10);r++){ if(String(val(q.getCell(r,rc))||'').replace(/\s/g,'')==='산출근거'){ const x=q.getCell(r,rc+2); if(x.value==null||x.value==='') x.style=Object.assign({},cp(q.getCell(r,rc+1).style)||{}); break; } } }
+      } }catch(e){ console.warn('[산출근거 산식]',e); }
       const colInfo=[];   /* {c, label, sur, surTot} */
       if(baseHdr){ for(let c=2;c<(rc||30);c++){ const h=String(val(q.getCell(baseHdr,c))||'').trim(); if(!h) break; colInfo.push({c, label:h.replace(/\s*\(㎡\)\s*$/,'').trim()}); }
         for(let r=baseHdr+1;r<=q.rowCount;r++){ const dn=String(val(q.getCell(r,1))||'').trim(); if(!dn||dn==='전체'||dn==='총물량') break;
@@ -7580,10 +7622,13 @@ async function nfUpgradeEstimateXlsx(buf){
             const roofAll=colInfo.filter(ci=>ci.tot!=null && /옥탑/.test(ci.label) && base.indexOf(ci)<0);
             const tries=[base, base.concat(roofAll)];
             let done=false;
-            for(const set of tries){ if(!set.length) continue; const sm=set.reduce((a,ci)=>a+ci.tot,0); if(Math.abs(sm-hq)<0.5){ setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+'),hq); done=true; break; } }
+            for(const set of tries){ if(!set.length) continue; const sm=set.reduce((a,ci)=>a+ci.tot,0); const fx=set.map(ci=>ci.addr).join('+');
+              if(Math.abs(sm-hq)<0.01){ setF(det,sec.hdr,4,fx,hq); done=true; break; }
+              if(Number.isInteger(hq) && Math.ceil(sm-1e-9)===hq){ setF(det,sec.hdr,4,'ROUNDUP('+fx+',0)',hq); done=true; break; } }   /* v8.3: 6102.55 → 6103 처럼 올림된 수량은 ROUNDUP으로 (숫자 그대로) */
             /* 뻐꾸기창(작은 3㎡·큰 4㎡)이 더해진 싱글·금속기와 — 차이가 정수 3㎡ 이상이고 10% 이내면 '+뻐꾸기창 면적'으로 연결 */
             if(!done && /싱글|금속기와/.test(kk[0])){ for(const set of tries){ if(!set.length) continue; const sm=set.reduce((a,ci)=>a+ci.tot,0); const df=Math.round(hq-sm);
-                if(df>=3 && Math.abs(hq-sm-df)<0.01 && df<=hq*0.1){ setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+')+'+'+df,hq); done=true; break; } } }
+                if(df>=3 && Math.abs(hq-sm-df)<0.01 && df<=hq*0.1){ setF(det,sec.hdr,4,set.map(ci=>ci.addr).join('+')+'+'+df,hq); done=true; break; }
+                const dc=Math.ceil(sm-1e-9); if(Number.isInteger(hq) && hq-dc>=3 && hq-dc<=hq*0.1){ setF(det,sec.hdr,4,'ROUNDUP('+set.map(ci=>ci.addr).join('+')+',0)+'+(hq-dc),hq); done=true; break; } } }
             /* 예전 파일: 물량산출 '전체'를 앱과 같은 ROUNDUP 방식으로 바꾸면 산출내역서 수량과 맞는 경우 → 바꾸고 연결 */
             if(!done){ for(const set of tries){ if(!set.length || set.some(ci=>ci.sRound==null)) continue; const sm=set.reduce((a,ci)=>a+ci.sRound,0); const df=Math.round(hq-sm);
                 const ok=Math.abs(sm-hq)<0.5 || (/싱글|금속기와/.test(kk[0]) && df>=3 && Math.abs(hq-sm-df)<0.01 && df<=hq*0.1);
@@ -7595,6 +7640,23 @@ async function nfUpgradeEstimateXlsx(buf){
       }
     }
   }catch(e){ console.warn('[연결 업데이트]',e); }
+  /* v8.3: 예전 업데이트에서 올림(ROUNDUP) 없이 연결된 공종 수량 수리 — 계산값이 칸 숫자와 다르면 ROUNDUP으로 감쌈(숫자 그대로) */
+  try{ const qs=wb.getWorksheet('물량산출내역서');
+    if(qs) for(let r=4;r<=det.rowCount;r++){ const c=det.getCell(r,4); if(!isF(c)) continue; const f=String(c.value.formula); const v=val(c);
+      if(typeof v!=='number' || /ROUNDUP/i.test(f) || !/물량산출내역서/.test(f)) continue;
+      const parts=f.split('+'); if(!parts.every(p=>/^'?물량산출내역서'?!\$?[A-Z]+\$?\d+$/.test(p.trim()))) continue;
+      const sm=parts.reduce((a,p)=>{ const ad=p.split('!')[1].replace(/\$/g,''); const x=val(qs.getCell(ad)); return a+(typeof x==='number'?x:NaN); },0);
+      if(isFinite(sm) && Math.abs(sm-v)>=0.01 && Number.isInteger(v) && Math.ceil(sm-1e-9)===v){ c.value={formula:'ROUNDUP('+f+',0)', result:v}; added++; } } }catch(e){ console.warn('[수량 수리]',e); }
+  /* v8.3: 안내사항 '○. 공법 실행가' → 일위대가표 소계 합계단가(L) 참조 (같은 값일 때만) */
+  try{ const cov=wb.getWorksheet('안내사항'), led2=wb.getWorksheet('일위대가표');
+    if(cov && led2){ const subs=[]; let nm=null;
+      for(let r=4;r<=led2.rowCount;r++){ const a=lab(led2,r); if(/^\d+(-\d+)?\./.test(a)){ nm=a.replace(/^\d+(-\d+)?\.?/,''); continue; } if(a==='소계'){ const v=num(led2,r,12); if(v!=null) subs.push({r,nm,v}); nm=null; } }
+      const used2=new Set();
+      for(let r=1;r<=Math.min(cov.rowCount,60);r++){ const b=String(val(cov.getCell(r,2))||'').replace(/\s+/g,''); if(!/실행가$/.test(b)) continue;
+        const gc=cov.getCell(r,7); if(isF(gc)) continue; const gv=val(gc); if(typeof gv!=='number') continue;
+        const cand=subs.filter(x=>!used2.has(x.r) && Math.abs(x.v-gv)<0.01); if(!cand.length) continue;
+        const best=cand.find(x=>x.nm && b.indexOf(x.nm)>=0) || cand[0]; used2.add(best.r);
+        gc.value={formula:"'일위대가표'!L"+best.r, result:gv}; added++; } } }catch(e){ console.warn('[실행가 연결]',e); }
   /* 갑지 — 글씨 있는 표지로 교체 */
   let cover=false;
   if(typeof NF_UPG_COVER!=='undefined' && NF_UPG_COVER) try{ const gap=wb.getWorksheet('갑지'); const imgs=gap.getImages(); if(imgs.length && typeof POUR_COVER_B64==='string'){ const m=wb.getImage(imgs[0].imageId);
