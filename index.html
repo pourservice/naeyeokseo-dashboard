@@ -451,6 +451,7 @@ input:focus,select:focus{border-color:var(--teal-500);box-shadow:0 0 0 3px rgba(
 #dash-app .fcard.latest{border-color:#E4572E;background:#FFF7F3;}
 #dash-app .fcard-row{display:flex;align-items:center;gap:8px;max-width:560px;}
 #dash-app .fcard-row .fcard{flex:1;min-width:0;}
+#dash-app .fcard-row .fc-sel{flex:none;width:16px;height:16px;margin:0;cursor:pointer;accent-color:#394867;}
 #dash-app .fc-mail{flex-shrink:0;border:1px solid #394867;background:#fff;color:#394867;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
 #dash-app .fc-mail:hover{background:#394867;color:#fff;}
 #dash-app .fcard.latest .fc-sub b{color:#E4572E;}
@@ -6099,7 +6100,8 @@ const NF_SHARED=[
   {k:'nf_pricelog2',        t:'arr'},
   {k:'nf_db',               t:'cfg'},
   {k:'nf_price_reason',     t:'cfg'},
-  {k:'nf_notices',          t:'cfg'}
+  {k:'nf_notices',          t:'cfg'},
+  {k:'nf_contacts',         t:'cfg'}    /* 메일 주소록(하이웍스 주소록 가져오기) — 팀 공유 */
 ];
 const NF_TS_KEY='nf_sync_ts';
 function nfTsMap(){ try{ return JSON.parse(localStorage.getItem(NF_TS_KEY)||'{}')||{}; }catch(e){ return {}; } }
@@ -6577,8 +6579,36 @@ function fileCard(f,isLatest){
   const ic={xls:'X',cad:'CAD',pdf:'PDF',img:'IMG',etc:(e||'FILE').toUpperCase().slice(0,4)}[kind];
   const sz=(f.size>0)?((f.size/1048576)>=1?(f.size/1048576).toFixed(1)+'MB':Math.max(1,Math.round(f.size/1024))+'KB'):'';
   const a=`<a class="fcard ${kind}${isLatest?' latest':''}" href="#" onclick="event.preventDefault();event.stopPropagation();nfPreviewReg('${id}')" title="${esc(nm)}"><span class="fc-ic">${ic}</span><span class="fc-body"><span class="fc-name">${esc(nm)}</span>${(sz||isLatest)?`<span class="fc-sub">${isLatest?'<b>최신 내역서</b>':''}${isLatest&&sz?' · ':''}${sz}</span>`:''}</span></a>`;
-  return kind==='xls' ? `<div class="fcard-row">${a}<button class="fc-mail" onclick="event.stopPropagation();nfMailOpenReg('${id}')" title="이 엑셀을 메일로 발송">📧 메일 발송</button></div>` : a;
+  const k=nfFileKey(f), on=(nfMailSel.card===currentDetailId && nfMailSel.map.has(k));
+  const cb=`<input type="checkbox" class="fc-sel" data-k="${esc(k)}" ${on?'checked':''} title="메일에 같이 보낼 파일 선택" onclick="event.stopPropagation();nfMailToggle('${id}',this.checked)">`;
+  return `<div class="fcard-row">${cb}${a}${kind==='xls'?`<button class="fc-mail" onclick="event.stopPropagation();nfMailOpenReg('${id}')" title="이 엑셀을 메일로 발송">📧 메일 발송</button>`:''}</div>`;
 }
+/* 댓글 파일 여러 개 선택 → 한 번에 메일 발송 (1안·2안 엑셀, PDF·이미지 같이) */
+const nfMailSel={card:null, map:new Map()};
+function nfFileKey(f){ return String(f&&f.url||'')+'|'+String(f&&f.name||''); }
+function nfMailToggle(id,on){ const f=nfFileReg[id]; if(!f) return;
+  if(nfMailSel.card!==currentDetailId){ nfMailSel.card=currentDetailId; nfMailSel.map.clear(); }
+  const k=nfFileKey(f); if(on) nfMailSel.map.set(k,f); else nfMailSel.map.delete(k);
+  document.querySelectorAll('.fc-sel').forEach(el=>{ if(el.getAttribute('data-k')===k) el.checked=!!on; });
+  nfMailBarDraw(); }
+function nfMailSelClear(){ nfMailSel.map.clear(); document.querySelectorAll('.fc-sel').forEach(el=>{ el.checked=false; }); nfMailBarDraw(); }
+function nfMailBarDraw(){
+  let bar=document.getElementById('nfMailBar');
+  const n=(nfMailSel.card===currentDetailId && currentDetailId)?nfMailSel.map.size:0;
+  if(!n){ if(bar) bar.style.display='none'; return; }
+  if(!bar){ bar=document.createElement('div'); bar.id='nfMailBar';
+    bar.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99990;background:#212A3E;color:#fff;border-radius:12px;padding:10px 12px 10px 16px;display:flex;gap:10px;align-items:center;box-shadow:0 10px 30px rgba(0,0,0,.3);font-size:13px;max-width:94vw;';
+    document.body.appendChild(bar); }
+  const names=[...nfMailSel.map.values()].map(f=>f.name||'파일');
+  bar.innerHTML='<span style="white-space:nowrap;">📎 <b>'+n+'개</b> 선택</span><span style="color:#AEB8C8;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px;">'+esc(names.join(', '))+'</span>'
+    +'<button id="nfMbSend" style="border:0;background:#fff;color:#212A3E;font-weight:700;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap;">📧 선택 파일 메일 발송</button>'
+    +'<button id="nfMbClr" style="border:1px solid #5A6478;background:transparent;color:#fff;border-radius:8px;padding:7px 10px;cursor:pointer;white-space:nowrap;">선택 해제</button>';
+  bar.style.display='flex';
+  document.getElementById('nfMbClr').onclick=nfMailSelClear;
+  document.getElementById('nfMbSend').onclick=()=>{ const r=reviews.find(x=>x.id===currentDetailId); if(!r) return; const fs=[...nfMailSel.map.values()];
+    fs.sort((a,b)=>(nfIsXls(b)?1:0)-(nfIsXls(a)?1:0)); nfMailDialog(r,fs); };
+}
+window.nfMailToggle=nfMailToggle;
 /* ===== v8.3: 📧 메일 발송 — 하이웍스 팀 계정으로 자동 발송 + 보낸편지함 저장 (발송 서버 경유) =====
    양식: 초안본 / 최종본. [단지명]·[공사범위]는 현장마다 창에서 따로 입력(카드 값으로 미리 채움) */
 const NF_MAIL_TPL={
@@ -6638,26 +6668,167 @@ function nfMailSetup(){
 function nfMailOpenReg(id){ const f=nfFileReg[id]; const r=reviews.find(x=>x.id===currentDetailId); if(f&&r) nfMailDialog(r,f); }
 window.nfMailOpenReg=nfMailOpenReg; window.nfMailSetup=nfMailSetup;
 function nfMailFill(t,site,scope){ return String(t).split('[단지명]').join(site||'').split('[공사범위]').join(scope||''); }
-function nfMailDialog(r,f){
+
+/* ===================== 메일 주소록 — 하이웍스 주소록(엑셀/CSV) 가져오기 → 업체명만 쳐도 메일 주소 자동 완성 (팀 공유) ===================== */
+const NF_CT_KEY='nf_contacts';
+function nfCtGet(){ try{ const o=JSON.parse(localStorage.getItem(NF_CT_KEY)||'null'); if(o&&Array.isArray(o.list)) return o; }catch(e){} return {list:[]}; }
+function nfCtSave(o){ try{ localStorage.setItem(NF_CT_KEY, JSON.stringify(o)); nfMark(NF_CT_KEY); nfPushSoon(); }catch(e){ toast('주소록 저장 실패: '+(e&&e.message||e)); } }
+function nfCtNorm(s){ return String(s||'').toLowerCase().replace(/\(주\)|㈜|주식회사|\(유\)|유한회사|\(사\)|\(재\)/g,'').replace(/[\s()\[\]·.,\-_/]/g,''); }
+const NF_EMAIL_RE=/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
+function nfCtSearch(q,limit){
+  const qn=nfCtNorm(q); if(!qn) return [];
+  const out=[];
+  nfCtGet().list.forEach(x=>{ const c=nfCtNorm(x.c), n=nfCtNorm(x.n), e=String(x.e||'').toLowerCase(), g=nfCtNorm((x.g||'')+(x.d||''));
+    let sc=0; if(c&&c===qn) sc=6; else if(c&&c.indexOf(qn)===0) sc=5; else if(c&&c.indexOf(qn)>=0) sc=4; else if(n&&n.indexOf(qn)>=0) sc=3; else if(e.indexOf(qn)>=0) sc=2; else if(g&&g.indexOf(qn)>=0) sc=1;
+    if(sc) out.push({x,sc}); });
+  out.sort((a,b)=>b.sc-a.sc || String(a.x.c||'').localeCompare(String(b.x.c||'')) || String(a.x.n||'').localeCompare(String(b.x.n||'')));
+  return out.slice(0,limit||14).map(o=>o.x);
+}
+/* 주소록 파일 읽기 — 하이웍스 내보내기(엑셀·CSV) / 아웃룩 CSV / 직접 만든 엑셀 모두: 머리글에서 회사·이름·메일 칸을 찾아 읽음 */
+async function nfCtParseFile(file){
+  const buf=await file.arrayBuffer(); let wb;
+  if(/\.(csv|txt)$/i.test(file.name||'')){ let txt; try{ txt=new TextDecoder('utf-8',{fatal:true}).decode(buf); }catch(e){ txt=new TextDecoder('euc-kr').decode(buf); } txt=txt.replace(/^﻿/,''); wb=XLSX.read(txt,{type:'string'}); }
+  else wb=XLSX.read(new Uint8Array(buf),{type:'array'});
+  const list=[];
+  wb.SheetNames.forEach(sn=>{
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:'',raw:false});
+    let hi=-1; for(let i=0;i<Math.min(rows.length,15);i++){ if((rows[i]||[]).some(v=>{ v=String(v||'').trim(); return v.length<30 && /메일|e-?mail/i.test(v) && !/@/.test(v); })){ hi=i; break; } }
+    if(hi<0){ rows.forEach(row=>(row||[]).forEach(v=>{ (String(v||'').match(NF_EMAIL_RE)||[]).forEach(e=>list.push({c:'',n:'',e})); })); return; }
+    const H=(rows[hi]||[]).map(v=>String(v||'').trim());
+    const find=(re,not)=>H.findIndex(h=>h && re.test(h) && !(not&&not.test(h)));
+    const emailCols=H.map((h,i)=>(h&&/메일|e-?mail/i.test(h))?i:-1).filter(i=>i>=0);
+    const cC=find(/회사|업체|거래처|소속|조직|단체|company|organization/i,/주소|전화|팩스|fax|phone|tel|우편|홈페이지/i);
+    const cN=find(/^(이름|성명|name|표시\s*이름|display\s*name|담당자)$/i);
+    const cLast=find(/^(성|last\s*name)$/i), cFirst=find(/^(이름|first\s*name)$/i);
+    const cD=find(/부서|department/i), cT=find(/직책|직위|직급|job\s*title|^title$/i), cG=find(/그룹|group|분류/i);
+    for(let i=hi+1;i<rows.length;i++){ const row=rows[i]||[]; const g=k=>k>=0?String(row[k]||'').trim():'';
+      let n=g(cN); if(!n && (cLast>=0||cFirst>=0)) n=(g(cLast)+g(cFirst)).trim();
+      const emails=[]; emailCols.forEach(k=>{ (String(row[k]||'').match(NF_EMAIL_RE)||[]).forEach(e=>emails.push(e)); });
+      emails.forEach(e=>list.push({c:g(cC), n, d:[g(cD),g(cT)].filter(Boolean).join(' '), g:g(cG), e}));
+    }
+  });
+  const seen=new Map(); list.forEach(x=>{ const k=String(x.e).toLowerCase(); const p=seen.get(k); if(!p || (!p.c&&x.c) || (!p.n&&x.n)) seen.set(k,x); });
+  return [...seen.values()];
+}
+function nfCtDialog(onDone){
+  const old=document.getElementById('nfCt'); if(old) old.remove();
+  const w=document.createElement('div'); w.id='nfCt';
+  w.style.cssText='position:fixed;inset:0;background:rgba(20,26,36,.5);z-index:100001;display:flex;align-items:center;justify-content:center;padding:14px;';
+  const inp='padding:7px 9px;border:1px solid #D8DEE6;border-radius:7px;font-family:inherit;font-size:13px;';
+  w.innerHTML='<div style="background:#fff;border-radius:12px;width:min(640px,97vw);max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-size:13px;color:#212A3E;">'
+    +'<div style="font-size:16px;font-weight:700;margin-bottom:6px;">📒 메일 주소록 <span id="ctCnt" style="font-size:12px;font-weight:400;color:#768194;"></span></div>'
+    +'<div style="background:#F4F6F9;border-radius:8px;padding:9px 11px;line-height:1.6;font-size:12.5px;">하이웍스 <b>주소록 → 내보내기</b>로 받은 <b>엑셀/CSV 파일</b>을 올려 주세요. 회사·이름·메일 칸을 알아서 찾아 읽고, <b>팀 전체가 같이</b> 씁니다.<br>메일 창의 받는 사람·참조 칸에 <b>업체명(또는 이름)</b>만 치면 메일 주소가 뜹니다.</div>'
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;"><input type="file" id="ctFile" accept=".xlsx,.xls,.csv,.txt" style="flex:1;min-width:200px;font-size:12.5px;">'
+      +'<label style="display:flex;gap:4px;align-items:center;font-size:12.5px;"><input type="radio" name="ctMode" value="merge" checked style="width:auto;margin:0;">합치기</label>'
+      +'<label style="display:flex;gap:4px;align-items:center;font-size:12.5px;"><input type="radio" name="ctMode" value="replace" style="width:auto;margin:0;">새로 바꾸기</label>'
+      +'<button id="ctLoad" style="padding:7px 12px;border:1px solid #394867;background:#394867;color:#fff;border-radius:8px;cursor:pointer;font-weight:700;">가져오기</button></div>'
+    +'<div style="margin-top:12px;font-weight:700;">직접 추가</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;"><input id="ctC" placeholder="업체명" style="'+inp+'flex:1;min-width:110px;"><input id="ctN" placeholder="이름(선택)" style="'+inp+'flex:1;min-width:90px;"><input id="ctE" placeholder="메일 주소" style="'+inp+'flex:2;min-width:160px;"><button id="ctAdd" style="padding:7px 12px;border:1px solid #394867;background:#fff;color:#394867;border-radius:8px;cursor:pointer;">추가</button></div>'
+    +'<div style="margin-top:12px;display:flex;gap:6px;align-items:center;"><input id="ctQ" placeholder="🔍 업체·이름·메일 검색" style="'+inp+'flex:1;"></div>'
+    +'<div id="ctList" style="margin-top:6px;max-height:300px;overflow:auto;border:1px solid #E3E8EF;border-radius:8px;"></div>'
+    +'<div style="display:flex;justify-content:flex-end;margin-top:12px;"><button id="ctClose" style="padding:8px 16px;border:1px solid #D8DEE6;background:#fff;border-radius:8px;cursor:pointer;">닫기</button></div></div>';
+  document.body.appendChild(w);
+  const $1=id=>document.getElementById(id);
+  const draw=()=>{ const o=nfCtGet(); $1('ctCnt').textContent='· '+o.list.length+'명'+(o.at?(' · '+String(o.at).slice(0,10)+(o.by?(' '+o.by):'')+' 갱신'):'');
+    const q=$1('ctQ').value.trim(); const arr=q?nfCtSearch(q,200):o.list.slice(0,200);
+    $1('ctList').innerHTML=arr.length?arr.map(x=>'<div style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid #F0F2F5;"><span style="flex:1;min-width:0;"><b>'+esc(x.c||'(업체 없음)')+'</b> '+esc(x.n||'')+(x.d?' <span style="color:#768194;font-size:11.5px;">'+esc(x.d)+'</span>':'')+'<br><span style="color:#394867;font-size:12px;">'+esc(x.e)+'</span></span><a href="#" data-del="'+esc(x.e)+'" style="color:#B33;font-size:12px;">삭제</a></div>').join('')+(!q&&o.list.length>200?'<div style="padding:6px 10px;color:#768194;font-size:12px;">… 검색으로 나머지를 찾아보세요</div>':'')
+      :'<div style="padding:14px;color:#768194;text-align:center;">'+(q?'검색 결과가 없어요':'아직 주소록이 비어 있어요')+'</div>';
+    $1('ctList').querySelectorAll('[data-del]').forEach(a=>a.onclick=e=>{ e.preventDefault(); const em=a.getAttribute('data-del'); if(!confirm(em+' 을(를) 주소록에서 지울까요?')) return; const o2=nfCtGet(); o2.list=o2.list.filter(x=>String(x.e).toLowerCase()!==String(em).toLowerCase()); o2.at=new Date().toISOString(); o2.by=lastAuthor||''; nfCtSave(o2); draw(); });
+  };
+  $1('ctQ').oninput=draw;
+  $1('ctLoad').onclick=async()=>{ const f=$1('ctFile').files&&$1('ctFile').files[0]; if(!f){ alert('하이웍스에서 내보낸 주소록 파일을 골라 주세요'); return; }
+    try{ const arr=await nfCtParseFile(f); if(!arr.length){ alert('파일에서 메일 주소를 찾지 못했어요. 메일 주소 칸이 있는 파일인지 확인해 주세요.'); return; }
+      const mode=(w.querySelector('input[name=ctMode]:checked')||{}).value||'merge';
+      const o=nfCtGet(); let list;
+      if(mode==='replace') list=arr; else { const m=new Map(o.list.map(x=>[String(x.e).toLowerCase(),x])); arr.forEach(x=>m.set(String(x.e).toLowerCase(), Object.assign({}, m.get(String(x.e).toLowerCase())||{}, Object.fromEntries(Object.entries(x).filter(([k,v])=>v))))); list=[...m.values()]; }
+      const noC=arr.filter(x=>!x.c).length;
+      nfCtSave({v:1, list, at:new Date().toISOString(), by:lastAuthor||''}); draw();
+      toast('주소록 '+arr.length+'명을 가져왔어요 (전체 '+list.length+'명)');
+      if(noC===arr.length) alert('메일 주소는 가져왔지만 업체명 칸을 찾지 못했어요.\n파일 첫 줄(머리글)에 ‘회사’ 또는 ‘업체’ 칸이 있는지 확인해 주세요. (이름·메일로는 검색돼요)');
+    }catch(e){ console.error('[contacts]',e); alert('주소록을 읽지 못했어요: '+(e&&e.message||e)); } };
+  $1('ctAdd').onclick=()=>{ const e=$1('ctE').value.trim(); if(!/^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/.test(e)){ alert('메일 주소를 확인해 주세요'); return; }
+    const o=nfCtGet(); o.list=o.list.filter(x=>String(x.e).toLowerCase()!==e.toLowerCase()); o.list.push({c:$1('ctC').value.trim(), n:$1('ctN').value.trim(), e}); o.at=new Date().toISOString(); o.by=lastAuthor||''; nfCtSave(o);
+    $1('ctC').value=''; $1('ctN').value=''; $1('ctE').value=''; draw(); toast('주소록에 추가했어요'); };
+  const close=()=>{ w.remove(); if(onDone) try{ onDone(); }catch(_){} };
+  $1('ctClose').onclick=close; w.addEventListener('click',e=>{ if(e.target===w) close(); });
+  draw();
+}
+/* 받는 사람·참조 칸 자동완성 — 쉼표 뒤 마지막 글자로 주소록 검색 */
+function nfCtAttach(input){
+  const dd=document.createElement('div');
+  dd.style.cssText='position:fixed;z-index:100002;background:#fff;border:1px solid #D8DEE6;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.18);max-height:300px;overflow:auto;display:none;font-size:12.5px;';
+  document.body.appendChild(dd);
+  let items=[], act=-1;
+  const hide=()=>{ dd.style.display='none'; act=-1; };
+  const pick=emails=>{ const parts=input.value.split(/[,;]/); parts.pop(); const cur=parts.map(x=>x.trim()).filter(Boolean); const low=cur.map(x=>x.toLowerCase());
+    emails.forEach(e=>{ if(low.indexOf(e.toLowerCase())<0){ cur.push(e); low.push(e.toLowerCase()); } }); input.value=cur.join(', ')+', '; hide(); input.focus(); try{ input.dispatchEvent(new Event('input')); }catch(_){} };
+  const paint=()=>{ dd.querySelectorAll('[data-i]').forEach(el=>{ el.style.background=(+el.getAttribute('data-i')===act)?'#EEF2F8':''; }); };
+  const show=()=>{ const tok=input.value.split(/[,;]/).pop().trim(); if(!tok || /@.+\./.test(tok)){ hide(); return; }
+    const res=nfCtSearch(tok,14); if(!res.length){ hide(); return; }
+    items=[]; let html=''; const byC={}; res.forEach(x=>{ const k=nfCtNorm(x.c); (byC[k]=byC[k]||[]).push(x); });
+    Object.keys(byC).forEach(ck=>{ const arr=byC[ck]; const c=ck?(arr[0].c||''):'';
+      if(c && arr.length>1){ items.push(arr.map(x=>x.e)); html+='<div data-i="'+(items.length-1)+'" style="padding:6px 10px;cursor:pointer;background:#F8FAFC;border-bottom:1px solid #F0F2F5;">🏢 <b>'+esc(c)+'</b> <span style="color:#394867;">— '+arr.length+'명 모두 넣기</span></div>'; }
+      arr.forEach(x=>{ items.push([x.e]); html+='<div data-i="'+(items.length-1)+'" style="padding:6px 10px 6px '+(c&&arr.length>1?'22':'10')+'px;cursor:pointer;border-bottom:1px solid #F0F2F5;"><b>'+esc(x.c||'')+'</b> '+esc(x.n||'')+(x.d?' <span style="color:#768194;">'+esc(x.d)+'</span>':'')+' <span style="color:#394867;">&lt;'+esc(x.e)+'&gt;</span></div>'; });
+    });
+    dd.innerHTML=html; const rc=input.getBoundingClientRect(); dd.style.left=rc.left+'px'; dd.style.top=(rc.bottom+2)+'px'; dd.style.width=Math.max(rc.width,320)+'px'; dd.style.display='block'; act=0; paint();
+    dd.querySelectorAll('[data-i]').forEach(el=>{ el.onmousedown=e=>{ e.preventDefault(); pick(items[+el.getAttribute('data-i')]); }; });
+  };
+  input.addEventListener('input',show);
+  input.addEventListener('keydown',e=>{ if(dd.style.display==='none') return;
+    if(e.key==='ArrowDown'){ e.preventDefault(); act=Math.min(items.length-1,act+1); paint(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); act=Math.max(0,act-1); paint(); }
+    else if(e.key==='Enter'){ if(act>=0&&items[act]){ e.preventDefault(); pick(items[act]); } }
+    else if(e.key==='Escape'){ e.stopPropagation(); hide(); } });
+  input.addEventListener('blur',()=>setTimeout(hide,150));
+  return {destroy(){ dd.remove(); }};
+}
+/* 공사 범위 자동 — 이 엑셀(마지막 내역서)을 올린 댓글 이후에 적힌 ‘공사범위: …’가 있으면 그것, 없으면 엑셀 갑지의 ‘▶ 공사 범위 : …’ */
+const NF_SCOPE_RE=/공\s*사\s*범\s*위\s*[:：]\s*(.+)/;
+function nfScopeFromComments(r,f){
+  const cs=r.comments||[]; let fi=-1;
+  cs.forEach((c,i)=>{ if((c.links||[]).some(l=>l===f || (l&&f&&((l.url&&l.url===f.url) || (l.name&&l.name===f.name))))) fi=i; });
+  for(let j=cs.length-1;j>=Math.max(fi,0);j--){ const c=cs[j]; if(!c||/^📧/.test(c.text||'')) continue;
+    const lines=String(c.text||'').split(/\n/); for(const ln of lines){ const m=ln.replace(/^[-·•*\s]+/,'').match(NF_SCOPE_RE); if(m&&m[1].trim()) return {v:m[1].trim(), src:'댓글 ('+(c.author||'')+' '+String(c.ts||'').slice(5,10).replace('-','/')+')'}; } }
+  return null;
+}
+const nfScopeCache={};
+async function nfScopeFromXlsx(f){
+  const key=String(f&&f.url||'')+'|'+(f&&f.name||''); if(key in nfScopeCache) return nfScopeCache[key];
+  const buf=await nfFileBytes(f); const JSZip=await nfLoadJSZip(); const zip=await JSZip.loadAsync(buf);
+  const dec=t=>t.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&#(\d+);/g,(m,n)=>String.fromCharCode(+n)).replace(/&amp;/g,'&');
+  const scan=xml=>{ const blocks=xml.match(/<(si|is)\b[\s\S]*?<\/\1>/g)||[]; for(const b of blocks){ const txt=dec((b.match(/<t\b[^>]*>([\s\S]*?)<\/t>/g)||[]).map(t=>t.replace(/<[^>]+>/g,'')).join('')); const m=txt.match(NF_SCOPE_RE); if(m&&m[1].trim()&&!/※/.test(txt)) return m[1].trim(); } return ''; };
+  let v=''; const ss=zip.file('xl/sharedStrings.xml'); if(ss) v=scan(await ss.async('string'));
+  if(!v){ const names=Object.keys(zip.files).filter(n=>/^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort(); for(const n of names.slice(0,3)){ v=scan(await zip.file(n).async('string')); if(v) break; } }
+  nfScopeCache[key]=v; return v;
+}
+function nfMailDialog(r,f0){
+  const atts=(Array.isArray(f0)?f0:[f0]).filter(Boolean).map(x=>({f:x}));   /* {f:카드 파일} 또는 {file:내 PC 파일} */
+  const f=(atts.find(a=>nfIsXls(a.f))||atts[0]||{}).f||{};
   const old=document.getElementById('nfMail'); if(old) old.remove();
   const isFinal=/최종본/.test(f&&f.name||'') || r.status==='final' || r.status==='done';
   const w=document.createElement('div'); w.id='nfMail';
   w.style.cssText='position:fixed;inset:0;background:rgba(20,26,36,.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:14px;';
   const inp='width:100%;padding:7px 9px;border:1px solid #D8DEE6;border-radius:7px;font-family:inherit;font-size:13px;';
   w.innerHTML='<div style="background:#fff;border-radius:12px;width:min(720px,97vw);max-height:94vh;overflow:auto;padding:18px 20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-size:13px;color:#212A3E;">'
-    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><div style="font-size:16px;font-weight:700;flex:1;">📧 메일 발송 <span style="font-size:12px;font-weight:400;color:#768194;">하이웍스 팀 계정 · 보낸편지함 저장</span></div><a href="#" id="mlSet" style="font-size:12px;color:#768194;">⚙ 발송 설정</a></div>'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><div style="font-size:16px;font-weight:700;flex:1;">📧 메일 발송 <span style="font-size:12px;font-weight:400;color:#768194;">하이웍스 계정으로 발송</span></div><a href="#" id="mlCt" style="font-size:12px;color:#394867;font-weight:600;">📒 주소록</a><a href="#" id="mlSet" style="font-size:12px;color:#768194;">⚙ 발송 설정</a></div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'
       +'<div style="flex:1;min-width:120px;"><b>양식</b><select id="mlTpl" style="'+inp+'margin-top:3px;"><option value="draft">초안본</option><option value="final">최종본</option></select></div>'
       +'<div style="flex:2;min-width:200px;"><b>단지명</b><input id="mlSite" style="'+inp+'margin-top:3px;"></div>'
     +'</div>'
-    +'<div style="margin-top:8px;"><b>공사 범위</b> <span style="color:#768194;font-size:11.5px;">현장마다 따로 적어주세요</span><input id="mlScope" style="'+inp+'margin-top:3px;" placeholder="예) 전체동(8개동) 싱글 옥상 방수공사_배수로 포함_옥탑제외"></div>'
+    +'<div style="margin-top:8px;"><b>공사 범위</b> <span id="mlScopeSrc" style="color:#768194;font-size:11.5px;">현장마다 따로 적어주세요</span><input id="mlScope" style="'+inp+'margin-top:3px;" placeholder="예) 전체동(8개동) 싱글 옥상 방수공사_배수로 포함_옥탑제외"></div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">'
-      +'<div style="flex:2;min-width:220px;"><b>받는 사람</b><input id="mlTo" style="'+inp+'margin-top:3px;" placeholder="메일 주소 (여러 명은 쉼표)"></div>'
-      +'<div style="flex:1;min-width:160px;"><b>참조</b><input id="mlCc" style="'+inp+'margin-top:3px;" placeholder="선택"></div>'
+      +'<div style="flex:2;min-width:220px;"><b>받는 사람</b><input id="mlTo" style="'+inp+'margin-top:3px;" placeholder="업체명·이름을 치면 주소록에서 찾아요 (여러 명은 쉼표)" autocomplete="off"></div>'
+      +'<div style="flex:1;min-width:160px;"><b>참조</b><input id="mlCc" style="'+inp+'margin-top:3px;" placeholder="선택 · 업체명으로 검색" autocomplete="off"></div>'
     +'</div>'
+    +'<div id="mlSug" style="margin-top:5px;font-size:12px;"></div>'
     +'<div style="margin-top:8px;"><b>제목</b><input id="mlSubj" style="'+inp+'margin-top:3px;"></div>'
     +'<div style="margin-top:8px;"><b>본문</b><textarea id="mlBody" rows="14" style="'+inp+'margin-top:3px;line-height:1.55;resize:vertical;"></textarea></div>'
-    +'<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b>첨부</b><span style="background:#F4F6F9;border:1px solid #E3E8EF;border-radius:7px;padding:4px 9px;"><span style="color:#1E9E5A;font-weight:800;">X</span> '+esc(f.name||'내역서.xlsx')+'</span>'
+    +'<div style="margin-top:8px;"><b>첨부</b> <span id="mlAttSum" style="color:#768194;font-size:12px;"></span>'
+      +'<div id="mlAtt" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>'
+      +'<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;"><button type="button" id="mlAddCard" style="padding:5px 10px;border:1px dashed #94A0B4;background:#fff;border-radius:7px;cursor:pointer;font-size:12.5px;">＋ 이 카드의 다른 파일</button>'
+      +'<label style="padding:5px 10px;border:1px dashed #94A0B4;background:#fff;border-radius:7px;cursor:pointer;font-size:12.5px;">＋ 내 PC 파일 (PDF·이미지 등)<input type="file" id="mlAddPc" multiple style="display:none;"></label></div>'
+      +'<div id="mlPick" style="display:none;margin-top:6px;border:1px solid #E3E8EF;border-radius:8px;max-height:220px;overflow:auto;"></div></div>'
+    +'<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
       +'<span style="margin-left:auto;"><b>보내는 직원</b> <select id="mlWho" style="padding:5px;border:1px solid #D8DEE6;border-radius:7px;">'+[''].concat(TEAM).map(n=>'<option'+(n===lastAuthor?' selected':'')+'>'+esc(n)+'</option>').join('')+'</select></span></div>'
     +'<div id="mlNote" style="margin-top:8px;font-size:12px;color:#B5651D;"></div>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap;">'
@@ -6668,8 +6839,46 @@ function nfMailDialog(r,f){
   document.body.appendChild(w);
   const $1=id=>document.getElementById(id);
   $1('mlTpl').value=isFinal?'final':'draft';
-  $1('mlSite').value=r.site||''; $1('mlScope').value=(r.scope||r.proj||'');
+  $1('mlSite').value=r.site||'';
+  /* 공사 범위: 댓글(이 엑셀 이후 ‘공사범위:’) → 엑셀 갑지 ‘▶ 공사 범위 :’ → 카드 값 */
+  let scopeTouched=false; const scSrc=t=>{ $1('mlScopeSrc').textContent=t; };
+  const scC=nfScopeFromComments(r,f);
+  if(scC){ $1('mlScope').value=scC.v; scSrc('✔ '+scC.src+'에서 가져옴'); }
+  else { $1('mlScope').value=(r.scope||r.proj||''); scSrc('⏳ 내역서(갑지)에서 공사 범위 읽는 중…');
+    (nfIsXls(f)?nfScopeFromXlsx(f):Promise.resolve('')).then(v=>{ if(!document.getElementById('nfMail')) return; if(v){ if(!scopeTouched){ $1('mlScope').value=v; $1('mlScope').oninput(); } scSrc('✔ 내역서 갑지에서 가져옴'+(scopeTouched?' (직접 고친 값 유지)':'')); } else scSrc((r.scope||r.proj)?'카드에 적힌 값 — 확인해 주세요':'현장마다 따로 적어주세요'); })
+      .catch(e=>{ console.warn('[mail scope]',e); if(document.getElementById('nfMail')) scSrc('내역서를 못 읽어 카드 값으로 채웠어요 — 확인해 주세요'); }); }
+  $1('mlScope').addEventListener('keydown',()=>{ scopeTouched=true; });
   $1('mlTo').value=r.mailTo||''; $1('mlCc').value=r.mailCc||'';
+  const ac1=nfCtAttach($1('mlTo')), ac2=nfCtAttach($1('mlCc'));
+  const drawSug=()=>{ const box=$1('mlSug'); if(!box) return; const ct=nfCtGet();
+    if(!ct.list.length){ box.innerHTML='<span style="color:#768194;">📒 주소록이 비어 있어요 — 오른쪽 위 <a href="#" data-ctopen style="color:#394867;">주소록</a>에서 하이웍스 주소록 파일을 한 번 올리면 업체명만 쳐도 주소가 떠요.</span>'; }
+    else { const keys=[r.req, r.site].map(x=>String(x||'').trim()).filter(Boolean); let hits=[]; keys.forEach(k=>{ nfCtSearch(k,8).forEach(x=>{ const c=nfCtNorm(x.c); if(c && (nfCtNorm(k).indexOf(c)>=0 || c.indexOf(nfCtNorm(k))>=0) && !hits.some(h=>h.e===x.e)) hits.push(x); }); });
+      box.innerHTML=hits.length?('<span style="color:#768194;">'+esc(r.req?'요청사':'현장')+' 주소록:</span> '+hits.slice(0,8).map(x=>'<a href="#" data-addto="'+esc(x.e)+'" style="display:inline-block;margin:2px 3px;padding:2px 8px;border:1px solid #D8DEE6;border-radius:12px;color:#394867;text-decoration:none;">+ '+esc((x.c||'')+(x.n?' '+x.n:''))+' &lt;'+esc(x.e)+'&gt;</a>').join('')):''; }
+    box.querySelectorAll('[data-addto]').forEach(a=>a.onclick=e=>{ e.preventDefault(); const em=a.getAttribute('data-addto'); const cur=$1('mlTo').value.split(/[,;]/).map(x=>x.trim()).filter(Boolean); if(!cur.some(x=>x.toLowerCase()===em.toLowerCase())) cur.push(em); $1('mlTo').value=cur.join(', '); });
+    box.querySelectorAll('[data-ctopen]').forEach(a=>a.onclick=e=>{ e.preventDefault(); nfCtDialog(drawSug); });
+  };
+  drawSug();
+  /* ── 첨부 목록 ── */
+  const attIc=n=>{ const e=(String(n||'').split('?')[0].match(/\.([a-z0-9]+)$/i)||[])[1]||''; const x=e.toLowerCase(); return ['xlsx','xlsm','xls','csv'].indexOf(x)>=0?['X','#1E9E5A']:(x==='pdf'?['PDF','#C2410C']:(['png','jpg','jpeg','gif','webp'].indexOf(x)>=0?['IMG','#7C3AED']:[(x||'FILE').toUpperCase().slice(0,4),'#475569'])); };
+  const attName=a=>a.f?(a.f.name||'파일'):(a.file&&a.file.name||'파일');
+  const attSize=a=>a.f?(+a.f.size||0):(a.file&&a.file.size||0);
+  const drawAtt=()=>{ const box=$1('mlAtt');
+    box.innerHTML=atts.length?atts.map((a,i)=>{ const ic=attIc(attName(a)); const sz=attSize(a); return '<span style="display:inline-flex;align-items:center;gap:6px;background:#F4F6F9;border:1px solid #E3E8EF;border-radius:7px;padding:4px 6px 4px 9px;max-width:100%;"><span style="color:'+ic[1]+';font-weight:800;font-size:11px;">'+ic[0]+'</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px;">'+esc(attName(a))+'</span>'+(sz?'<span style="color:#768194;font-size:11px;">'+(sz>=1048576?(sz/1048576).toFixed(1)+'MB':Math.max(1,Math.round(sz/1024))+'KB')+'</span>':'')+(a.file?'<span style="color:#768194;font-size:11px;">내 PC</span>':'')+'<a href="#" data-rm="'+i+'" title="빼기" style="color:#94A0B4;text-decoration:none;font-weight:700;padding:0 3px;">✕</a></span>'; }).join('')
+      :'<span style="color:#B5651D;font-size:12.5px;">첨부 파일이 없어요</span>';
+    $1('mlAttSum').textContent=atts.length?('· '+atts.length+'개'):'';
+    box.querySelectorAll('[data-rm]').forEach(el=>el.onclick=e=>{ e.preventDefault(); atts.splice(+el.getAttribute('data-rm'),1); drawAtt(); drawPick(); });
+  };
+  const cardFiles=()=>{ const out=[], seen=new Set(); (r.comments||[]).slice().reverse().forEach(c=>(c.links||[]).forEach(l=>{ if(!l||!l.name) return; const k=nfFileKey(l); if(seen.has(k)) return; seen.add(k); out.push({l,c}); })); return out; };
+  const drawPick=()=>{ const box=$1('mlPick'); if(box.style.display==='none') return; const have=new Set(atts.filter(a=>a.f).map(a=>nfFileKey(a.f)));
+    const list=cardFiles().filter(x=>!have.has(nfFileKey(x.l)));
+    box.innerHTML=list.length?list.map((x,i)=>{ const ic=attIc(x.l.name); return '<label style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid #F0F2F5;cursor:pointer;"><input type="checkbox" data-pk="'+i+'" style="width:auto;margin:0;"><span style="color:'+ic[1]+';font-weight:800;font-size:11px;min-width:26px;">'+ic[0]+'</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(x.l.name)+'</span><span style="color:#768194;font-size:11px;white-space:nowrap;">'+esc(x.c.author||'')+' '+esc(String(x.c.ts||'').slice(5,10).replace('-','/'))+'</span></label>'; }).join('')+'<div style="padding:6px 10px;text-align:right;"><button type="button" id="mlPickOk" style="padding:5px 12px;border:1px solid #394867;background:#394867;color:#fff;border-radius:7px;cursor:pointer;">선택한 파일 추가</button></div>'
+      :'<div style="padding:10px;color:#768194;text-align:center;">이 카드에 더 올라온 파일이 없어요</div>';
+    const ok=$1('mlPickOk'); if(ok) ok.onclick=()=>{ box.querySelectorAll('[data-pk]').forEach(cb=>{ if(cb.checked) atts.push({f:list[+cb.getAttribute('data-pk')].l}); }); box.style.display='none'; drawAtt(); };
+  };
+  $1('mlAddCard').onclick=()=>{ const b=$1('mlPick'); b.style.display=(b.style.display==='none')?'block':'none'; drawPick(); };
+  $1('mlAddPc').onchange=e=>{ [...(e.target.files||[])].forEach(file=>atts.push({file})); e.target.value=''; drawAtt(); };
+  drawAtt();
+  $1('mlCt').onclick=e=>{ e.preventDefault(); nfCtDialog(drawSug); };
   let edited=false;
   const fill=()=>{ const t=NF_MAIL_TPL[$1('mlTpl').value]; $1('mlSubj').value=nfMailFill(t.subject,$1('mlSite').value.trim(),$1('mlScope').value.trim()); if(!edited) $1('mlBody').value=nfMailFill(t.body,$1('mlSite').value.trim(),$1('mlScope').value.trim()); };
   const refill=()=>{ if(edited && !confirm('본문을 직접 고치셨어요. 양식으로 다시 채울까요? (고친 내용은 사라져요)')){ const t=NF_MAIL_TPL[$1('mlTpl').value]; $1('mlSubj').value=nfMailFill(t.subject,$1('mlSite').value.trim(),$1('mlScope').value.trim()); return; } edited=false; fill(); };
@@ -6677,40 +6886,60 @@ function nfMailDialog(r,f){
   $1('mlScope').oninput=$1('mlSite').oninput; $1('mlBody').oninput=()=>{ edited=true; };
   fill();
   const cfg=nfMailCfg(); if(!cfg.url||!cfg.key) $1('mlNote').innerHTML='⚠ 발송 서버가 아직 설정되지 않았어요 — 오른쪽 위 <b>⚙ 발송 설정</b>에서 주소와 키를 넣으면 자동 발송됩니다. (지금은 “메일 프로그램으로 열기”만 가능)';
-  const close=()=>w.remove();
+  const close=()=>{ try{ ac1.destroy(); ac2.destroy(); }catch(_){} w.remove(); };
   $1('mlCancel').onclick=close; w.addEventListener('click',e=>{ if(e.target===w) close(); });
   $1('mlSet').onclick=(e)=>{ e.preventDefault(); if(nfMailSetup()){ const c2=nfMailCfg(); $1('mlNote').textContent=(c2.url&&c2.key)?'':'⚠ 주소와 키를 모두 넣어주세요'; } };
+  let mailUpLinks=[];
   const saveCard=async(logText)=>{ r.mailTo=$1('mlTo').value.trim(); r.mailCc=$1('mlCc').value.trim(); if(!r.scope && $1('mlScope').value.trim()) r.scope=$1('mlScope').value.trim();
     const who=$1('mlWho').value||lastAuthor||'(미입력)';
-    r.comments=r.comments||[]; r.comments.push({id:'c'+Date.now()+rand(), author:who, ts:new Date().toISOString(), text:logText, links:[]});
+    r.comments=r.comments||[]; r.comments.push({id:'c'+Date.now()+rand(), author:who, ts:new Date().toISOString(), text:logText, links:mailUpLinks.slice()});
     await save(); renderDetail(); render(); };
   $1('mlManual').onclick=async()=>{
-    try{ nfDownloadFile(f); }catch(_){}
+    const tidy=v=>String(v||'').split(/[,;]/).map(x=>x.trim()).filter(Boolean).join(', '); $1('mlTo').value=tidy($1('mlTo').value); $1('mlCc').value=tidy($1('mlCc').value);
+    atts.forEach(a=>{ try{ if(a.f) nfDownloadFile(a.f); }catch(_){} });
     const u='mailto:'+encodeURIComponent($1('mlTo').value.trim())+'?'+($1('mlCc').value.trim()?('cc='+encodeURIComponent($1('mlCc').value.trim())+'&'):'')+'subject='+encodeURIComponent($1('mlSubj').value)+'&body='+encodeURIComponent($1('mlBody').value);
     try{ window.location.href=u; }catch(_){}
-    toast('엑셀을 내려받았어요 — 열린 메일 창에 첨부해서 보내주세요');
+    toast('첨부 파일을 내려받았어요 — 열린 메일 창에 첨부해서 보내주세요');
   };
   $1('mlSend').onclick=async()=>{
+    const tidy=v=>String(v||'').split(/[,;]/).map(x=>x.trim()).filter(Boolean).join(', ');
+    $1('mlTo').value=tidy($1('mlTo').value); $1('mlCc').value=tidy($1('mlCc').value);
     const to=$1('mlTo').value.trim(); if(!to){ alert('받는 사람 메일 주소를 넣어주세요'); return; }
     if(!/^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+(\s*[,;]\s*[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+)*$/.test(to)){ alert('받는 사람 메일 주소 형식을 확인해 주세요'); return; }
     if(!$1('mlScope').value.trim() && !confirm('공사 범위가 비어 있어요. 그대로 보낼까요?')) return;
     const c=nfMailCfg(); if(!c.url||!c.key){ alert('발송 서버가 설정되지 않았어요. ⚙ 발송 설정에서 주소와 키를 넣어주세요.'); return; }
-    if(!confirm('‘'+to+'’에게 '+NF_MAIL_TPL[$1('mlTpl').value].label+' 메일을 발송할까요?\n첨부: '+(f.name||''))) return;
+    if(!atts.length && !confirm('첨부 파일 없이 보낼까요?')) return;
+    if(!confirm('‘'+to+'’에게 '+NF_MAIL_TPL[$1('mlTpl').value].label+' 메일을 발송할까요?\n첨부 '+atts.length+'개: '+atts.map(attName).join(', '))) return;
     const btn=$1('mlSend'); btn.disabled=true; btn.textContent='발송 중…';
     try{
-      let attachment;
-      const url0=String(f.url||'');
-      if(url0.indexOf('gdrive:')===0) attachment={name:f.name, gdriveId:url0.slice(7), apiKey:NF_GD_API_KEY};
-      else { const buf=await nfFileBytes(f); if(buf.byteLength>3.3*1048576) throw new Error('파일이 커서('+(buf.byteLength/1048576).toFixed(1)+'MB) 바로 보낼 수 없어요. 드라이브에 올라간 파일이어야 해요 — 📦 드라이브 이관 후 다시 시도해 주세요.');
-        let bin=''; const u8=new Uint8Array(buf); for(let i=0;i<u8.length;i+=0x8000) bin+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); attachment={name:f.name, b64:btoa(bin)}; }
+      /* 첨부 준비: 드라이브 파일은 서버가 직접 받음(크기 무관) · 내 PC 파일은 먼저 드라이브에 올려 카드에도 기록 · 나머지는 직접 실어 보냄(합계 약 3MB) */
+      const toB64=buf=>{ let bin=''; const u8=new Uint8Array(buf); for(let i=0;i<u8.length;i+=0x8000) bin+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return btoa(bin); };
+      const parts=[], upLinks=[]; let inline=0; const big=[];
+      for(let i=0;i<atts.length;i++){ const a=atts[i]; btn.textContent='첨부 준비 중… ('+(i+1)+'/'+atts.length+')';
+        let lf=a.f;
+        if(a.file){ try{ const up=await nfUploadAttachment(a.file, r.id); if(up&&up.url){ lf=up; upLinks.push(up); } }catch(e){ console.warn('[mail att upload]',e); } }
+        const u=String(lf&&lf.url||'');
+        if(u.indexOf('gdrive:')===0){ parts.push({name:attName(a), gdriveId:u.slice(7), apiKey:NF_GD_API_KEY}); continue; }
+        const buf=a.file?await a.file.arrayBuffer():await nfFileBytes(a.f);
+        inline+=buf.byteLength; if(buf.byteLength>1.5*1048576) big.push(attName(a)+' '+(buf.byteLength/1048576).toFixed(1)+'MB');
+        parts.push({name:attName(a), b64:toB64(buf)});
+      }
+      if(inline>3.2*1048576) throw new Error('드라이브에 없는 첨부 합계가 '+(inline/1048576).toFixed(1)+'MB라 한 번에 보낼 수 없어요 (약 3MB까지).\n큰 파일: '+(big.join(', ')||'-')+'\n→ 📦 드라이브 이관 후 다시 보내거나, 파일을 나눠서 보내 주세요.');
+      btn.textContent='발송 중…';
+      const attachment=parts[0], attachments=parts.slice(1); mailUpLinks=upLinks;
       const body=$1('mlBody').value;
       const html='<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:14px;line-height:1.7;color:#222;">'+esc(body).replace(/\n/g,'<br>')+'</div>';
-      const resp=await fetch(c.url,{method:'POST', headers:{'Content-Type':'text/plain;charset=UTF-8'}, body:JSON.stringify({key:c.key, to, cc:$1('mlCc').value.trim()||undefined, subject:$1('mlSubj').value, text:body, html, attachment})});
+      const resp=await fetch(c.url,{method:'POST', headers:{'Content-Type':'text/plain;charset=UTF-8'}, body:JSON.stringify({key:c.key, to, cc:$1('mlCc').value.trim()||undefined, subject:$1('mlSubj').value, text:body, html, attachment, attachments})});
       let j={}; try{ j=await resp.json(); }catch(_){}
       if(!resp.ok||!j.ok) throw new Error(j.error||('서버 응답 '+resp.status));
+      const oldSrv=(j.attached===true && parts.length>1);   /* 발송 서버가 옛 버전이면 첫 파일만 붙음 */
       const kind=NF_MAIL_TPL[$1('mlTpl').value].label;
-      await saveCard('📧 '+kind+' 메일 발송 완료\n- 받는 사람: '+to+($1('mlCc').value.trim()?('\n- 참조: '+$1('mlCc').value.trim()):'')+'\n- 제목: '+$1('mlSubj').value+'\n- 첨부: '+(f.name||'')+(j.sentFolder?('\n- 보낸편지함 저장: '+j.sentFolder):(j.sentErr?('\n- ⚠ 보낸편지함 저장 실패: '+j.sentErr):'')));
-      close(); toast('메일을 보냈어요'+(j.sentFolder?' · 보낸편지함 저장 완료':''));
+      await saveCard('📧 '+kind+' 메일 발송 완료\n- 받는 사람: '+to+($1('mlCc').value.trim()?('\n- 참조: '+$1('mlCc').value.trim()):'')+'\n- 제목: '+$1('mlSubj').value+'\n- 첨부: '+(atts.map(attName).join(', ')||'없음')+(oldSrv?'\n- ⚠ 발송 서버가 옛 버전이라 첫 파일만 첨부됨':'')+(j.sentFolder?('\n- 보낸편지함 저장: '+j.sentFolder):(j.sentErr?('\n- ⚠ 보낸편지함 저장 실패: '+j.sentErr):'')));
+      /* 발송에 쓴 새 메일 주소는 주소록에 자동 저장(업체 = 카드 요청사) → 다음부터 업체명으로 바로 검색 */
+      try{ const o=nfCtGet(); const have=new Set(o.list.map(x=>String(x.e).toLowerCase())); let add=0;
+        (to+','+($1('mlCc').value||'')).split(/[,;]/).map(x=>x.trim()).filter(x=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)).forEach(e=>{ if(!have.has(e.toLowerCase())){ have.add(e.toLowerCase()); o.list.push({c:(r.req||r.site||'').trim(), n:'', d:'메일 발송 때 자동 저장', e}); add++; } });
+        if(add){ o.at=new Date().toISOString(); o.by=lastAuthor||''; nfCtSave(o); } }catch(_){}
+      close(); toast('메일을 보냈어요 (첨부 '+atts.length+'개)'); if(oldSrv) alert('메일은 보냈지만 발송 서버가 옛 버전이라 첫 파일만 첨부됐어요.\nGitHub의 netformconsulting-mail 저장소에 새 send.js를 올려 주세요.');
     }catch(e){ console.error('[mail]',e); alert('메일 발송 실패: '+(e&&e.message?e.message:e)); btn.disabled=false; btn.textContent='📧 발송'; }
   };
 }
@@ -6900,8 +7129,8 @@ function wireDnD(){
 
 /* ---------- detail / thread ---------- */
 let detailNotesEdit=false, editingCmtId=null;
-function openDetail(r){currentDetailId=r.id;detailLinks=[];detailNotesEdit=false;editingCmtId=null;renderDetail();detailOverlay.classList.add('show');}
-function closeDetail(){detailOverlay.classList.remove('show');currentDetailId=null;}
+function openDetail(r){if(currentDetailId!==r.id){ try{ nfMailSel.map.clear(); }catch(_){} } currentDetailId=r.id;try{ setTimeout(nfMailBarDraw,0); }catch(_){}detailLinks=[];detailNotesEdit=false;editingCmtId=null;renderDetail();detailOverlay.classList.add('show');}
+function closeDetail(){detailOverlay.classList.remove('show');currentDetailId=null;try{ nfMailSel.map.clear(); nfMailBarDraw(); }catch(_){}}
 function renderDetail(){
   const __sc=nfScrollSnap();
   try{ __renderDetailInner(); } finally { nfScrollRestore(__sc); }
