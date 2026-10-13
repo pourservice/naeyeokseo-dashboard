@@ -351,6 +351,9 @@ td.dim-cell .dimcalc{font-size:11.5px;color:var(--accent);font-weight:700;text-a
 .bld-card .bc-dc{font-size:10.5px;font-weight:700;color:var(--accent);background:var(--teal-100);border-radius:10px;padding:1px 6px;white-space:nowrap;}
 .bld-card .bc-del{border:1px solid var(--border);background:#fff;color:var(--text-sub);width:24px;height:24px;border-radius:6px;cursor:pointer;font-size:12px;line-height:1;flex:none;}
 .bld-card .bc-del:hover{border-color:var(--danger);color:var(--danger);}
+.bld-card .bc-mv{border:1px solid var(--border);background:#fff;color:var(--text-sub);width:20px;height:24px;border-radius:6px;cursor:pointer;font-size:9px;line-height:1;flex:none;padding:0;}
+.bld-card .bc-mv:hover:not([disabled]){border-color:var(--accent);color:var(--accent);}
+.bld-card .bc-mv[disabled]{opacity:.35;cursor:default;}
 .bld-card .bc-works{display:flex;flex-direction:column;gap:8px;}
 .bld-card .bc-work{border-top:1px dashed #F1F6F9;padding-top:7px;}
 .bld-card .bc-work:first-child{border-top:none;padding-top:0;}
@@ -897,7 +900,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <div class="section-label"><span class="bar"></span>STEP 2 · 동별 물량 입력 <span class="note">— 사용할 공종만 선택하면 해당 컬럼만 표시됩니다</span></div>
     <div class="panel">
       <div class="s2-works"><span class="s2-lb">공종 선택</span><div class="s2-chips" id="s2Works"></div></div>
-      <div class="panel-head"><h3>동별 산출면적</h3><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;"><button class="btn sm" onclick="estPickCad()" style="background:var(--info,#2a5ad3);color:#fff;">📐 캐드/PDF로 자동입력</button><input id="estCadFile" type="file" accept=".dwg,.dxf,.pdf" style="display:none" onchange="estReadCadFile(this)"><label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-sub);cursor:pointer;"><input type="checkbox" id="roofToggle" onchange="toggleRoof(this.checked)" style="width:auto;"> 옥탑 입력</label><button class="btn sm ghost" onclick="addBuilding()">+ 동 추가</button></div></div>
+      <div class="panel-head"><h3>동별 산출면적</h3><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;"><button class="btn sm" onclick="estPickCad()" style="background:var(--info,#2a5ad3);color:#fff;">📐 캐드/PDF로 자동입력</button><input id="estCadFile" type="file" accept=".dwg,.dxf,.pdf" style="display:none" onchange="estReadCadFile(this)"><label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-sub);cursor:pointer;"><input type="checkbox" id="roofToggle" onchange="toggleRoof(this.checked)" style="width:auto;"> 옥탑 입력</label><button class="btn sm ghost" onclick="sortBuildingsByDong()" title="동 이름 번호 순서(101·102·103…)로 카드 정렬">🔢 번호순 정렬</button><button class="btn sm ghost" onclick="addBuilding()">+ 동 추가</button></div></div>
       <div style="font-size:12px;color:var(--ink-faint,#9BA4B5);margin:-4px 0 8px;">캐드(.dwg/.dxf)나 글자 살아있는 PDF를 올리면 <b>동별 면적·둘레</b>를 자동으로 채워요 — 빨강=싱글/금속기와 · 녹색=옥탑 · 파랑=슬라브/배수로.</div>
       <div id="estCadBox"></div>
       <div id="areaCoeffBox"></div>
@@ -1755,11 +1758,25 @@ function dongTokens(name){
   return out;
 }
 function dongCount(b){ const t=dongTokens(b&&b.name); return t.length||1; }
+/* v8.5: 동 번호 순 정렬 — '152동, 156동'처럼 묶인 칸은 가장 작은 번호 기준. 숫자 없는 이름이 하나라도 있으면 입력 순서 그대로 */
+function nfDongKey(name){ const ns=String(name||'').match(/\d+/g); return ns?ns.map(Number):null; }
+function nfDongCmp(a,b){ const x=nfDongKey(a), y=nfDongKey(b); for(let i=0;i<Math.max(x.length,y.length);i++){ const p=x[i], q=y[i]; if(p==null) return -1; if(q==null) return 1; if(p!==q) return p-q; } return String(a).localeCompare(String(b)); }
+function nfSortByDong(arr, nameOf){ nameOf=nameOf||(x=>x.name); if(!arr.length || !arr.every(x=>nfDongKey(nameOf(x)))) return arr;
+  return arr.map((x,i)=>({x,i})).sort((A,B)=>nfDongCmp(nameOf(A.x),nameOf(B.x))||(A.i-B.i)).map(o=>o.x); }
 function expandedBuildings(){
   const out=[];
   buildings.forEach(b=>{ const t=dongTokens(b.name); if(t.length<=1){ out.push(b); } else { t.forEach(nm=>{ const c=Object.assign({},b); c.name=nm; out.push(c); }); } });
-  return out;
+  /* 동 카드가 번호 순이면 엑셀도 낱동까지 번호 순(151·152·153…), 직접 순서를 바꿔 놨으면 그 순서 그대로 */
+  const firstNm=b=>{ const t=dongTokens(b.name); return (t&&t.length>1)?t.slice().sort(nfDongCmp)[0]:b.name; };
+  const cardsSorted=buildings.every(b=>nfDongKey(firstNm(b))) && buildings.every((b,i)=>i===0||nfDongCmp(firstNm(buildings[i-1]),firstNm(b))<=0);
+  return cardsSorted?nfSortByDong(out):out;
 }
+/* v8.5: 동 순서 바꾸기 — 카드 ◀▶ 이동 · 번호순 정렬 버튼 */
+function moveB(i,d){ const j=i+d; if(j<0||j>=buildings.length) return; const t=buildings[i]; buildings[i]=buildings[j]; buildings[j]=t; renderBuildings(); recalc(); }
+function sortBuildingsByDong(){ const firstNm=b=>{ const t=dongTokens(b.name); return (t&&t.length>1)?t.slice().sort(nfDongCmp)[0]:b.name; };
+  if(!buildings.every(b=>nfDongKey(firstNm(b)))){ alert('동 이름에 번호가 없는 칸이 있어서 정렬할 수 없어요. (예: 관리동 → 번호 순 대신 ◀▶로 옮겨 주세요)'); return; }
+  const sorted=nfSortByDong(buildings.slice(), firstNm); buildings.length=0; sorted.forEach(b=>buildings.push(b)); renderBuildings(); recalc(); try{ toast('동 번호 순으로 정렬했어요'); }catch(_){} }
+window.moveB=moveB; window.sortBuildingsByDong=sortBuildingsByDong;
 /* 뻐꾸기창(도머) — 동별·공법별 개수 {small,big}. 작은창 3㎡·큰창 4㎡ (싱글·금속기와) */
 const DORMER_WORKS=['shingle','metal'];
 function dormerAreaB(b,cid){ const d=(b&&b.dormers&&b.dormers[cid])||null; if(!d) return 0; return 3*num(d.small)+4*num(d.big); }
@@ -1947,7 +1964,7 @@ function renderBuildings(){
     const dc=dongCount(b);
     const dcTag=dc>1?`<span class="bc-dc">${dc}개동</span>`:'';
     return `<div class="bld-card">
-      <div class="bc-head"><input class="bc-name" type="text" value="${b.name}" oninput="updBname(${i},this.value)" placeholder="예: 101동 또는 101~103동">${dcTag}<button class="bc-del" onclick="delB(${i})" title="이 동 삭제">✕</button></div>
+      <div class="bc-head"><input class="bc-name" type="text" value="${b.name}" oninput="updBname(${i},this.value)" placeholder="예: 101동 또는 101~103동">${dcTag}<button class="bc-mv" onclick="moveB(${i},-1)" title="앞으로" ${i===0?'disabled':''}>◀</button><button class="bc-mv" onclick="moveB(${i},1)" title="뒤로" ${i===buildings.length-1?'disabled':''}>▶</button><button class="bc-del" onclick="delB(${i})" title="이 동 삭제">✕</button></div>
       <div class="bc-works">${works}</div>
     </div>`;
   }).join('') + `<button class="bld-add" onclick="addBuilding()">＋ 동 추가</button>`;
@@ -3995,6 +4012,8 @@ function estFill(){
       if(!hasArea) buildings.splice(e,1); else break;   /* 값이 있는 동은 지우지 않음 */
     }
   }
+  /* v8.5: 캐드에서 읽은 동을 번호 순으로 정렬 (도면에 그려진 순서가 뒤섞여 있어도 101·102·103…) */
+  try{ const sorted=nfSortByDong(buildings.slice(), function(b){ var t=dongTokens(b.name); return (t&&t.length>1)?t.slice().sort(nfDongCmp)[0]:b.name; }); buildings.length=0; sorted.forEach(function(b){ buildings.push(b); }); }catch(e){}
   /* ★ '단지 전체 동수' 입력칸 자동 반영 — 캐드에서 읽은 동수를 그대로 표시 */
   var td=document.getElementById('totalDong'); if(td) td.value=buildings.length;
   if(typeof saveDB==='function') saveDB();
