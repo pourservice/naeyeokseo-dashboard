@@ -7305,7 +7305,7 @@ function __renderDetailInner(){
       <div class="c-top"><span class="c-author">${esc(c.author)}</span><span class="c-time">${timeLbl}</span>${tools}</div>
       ${bodyHtml}
       ${editing
-        ? `<div class="c-files fcards">${(c.links||[]).map((l,j)=>`<div style="display:flex;align-items:center;gap:6px;">${fileCard(l,(c.id===lfCid&&j===lfIdx))}<button class="mini-btn" data-cfrep="${c.id}|${j}" title="이 파일을 새 파일로 갈아끼우기">🔁 교체</button><button class="mini-btn" data-cfdel="${c.id}|${j}" title="이 댓글에서 파일 빼기" style="color:#B33;">✕ 빼기</button></div>`).join('')}<div><button class="mini-btn" data-cfadd="${c.id}">＋ 파일 추가</button></div></div>`
+        ? `<div class="c-files fcards">${(c.links||[]).map((l,j)=>`<div>${fileCard(l,(c.id===lfCid&&j===lfIdx))}<div style="display:flex;gap:6px;margin:4px 0 2px 24px;"><button class="mini-btn" data-cfrep="${c.id}|${j}" title="이 파일을 새 파일로 갈아끼우기">🔁 교체</button><button class="mini-btn" data-cfdel="${c.id}|${j}" title="이 댓글에서 파일 빼기" style="color:#B33;">✕ 빼기</button></div></div>`).join('')}<div><button class="mini-btn" data-cfadd="${c.id}">＋ 파일 추가</button></div></div>`
         : ((c.links&&c.links.length)?`<div class="c-files fcards">${c.links.map((l,j)=>fileCard(l,(c.id===lfCid&&j===lfIdx))).join('')}</div>`:'')}
     </div>`;
   }).join(''):'<div class="thread-empty">아직 댓글이 없습니다. 아래에서 첫 코멘트나 파일을 올려보세요.</div>';
