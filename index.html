@@ -1047,7 +1047,9 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     </header>
     <div class="panel">
       <div class="panel-head"><h3>발행 목록</h3>
-        <div style="display:flex;gap:6px;align-items:center;">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="histSearch" placeholder="🔍 현장명·메모·날짜 검색" oninput="renderHistory()" style="width:200px;padding:6px 9px;border:1px solid var(--line,#D8DEE6);border-radius:7px;font-size:13px;">
+          <select id="histSort" onchange="renderHistory()" style="padding:6px 8px;border:1px solid var(--line,#D8DEE6);border-radius:7px;font-size:13px;"><option value="site">현장별 · 회차순</option><option value="new">최신 발행순</option><option value="old">오래된 발행순</option></select>
           <input type="file" id="histImport" accept=".json,application/json" style="display:none" onchange="importSnapshotFile(event)">
           <button class="btn sm ghost" onclick="document.getElementById('histImport').click()">.json 불러오기</button>
         </div>
@@ -1564,10 +1566,7 @@ function wallAreaTotal(){
 /* 벽체도포 포함 체크 시 : 슬라브·배수로 둘레(자동) × 높이 → 물량 자동 반영 (직접 수정하면 중단) */
 function syncWall(){
   const i=extras.findIndex(e=>e.n==='벽체도포'); if(i<0) return;
-  if(!wallInclude){   /* 미포함 — 벽체도포 물량 0으로 (내역서·일위대가에서 자동 제외) */
-    if(extras[i].q!==0){ extras[i].q=0; const qi0=document.getElementById('ex_q_'+i); if(qi0&&document.activeElement!==qi0) qi0.value=0; const ac0=document.getElementById('ex_amt_'+i); if(ac0) ac0.textContent=won(0); }
-    return;
-  }
+  if(!wallInclude) return;   /* v8.7: 미포함 — 기타공사 '벽체도포'에 직접 넣은 물량은 그대로 두고 기타공사(㎡당 단가)로 */
   if(extras[i].manualQ) return;
   if(!(activeWorks.includes('dual')||activeWorks.includes('drain'))) return;
   const a=wallAreaTotal(); if(a<=0) return;
@@ -1602,7 +1601,7 @@ function evalExpr(v){
 function workOfCid(cid){ const c=categories.find(x=>x.id===cid); return c?c.work:null; }
 function hasAreaFormula(c){ return c && c.mode==='recipe' && c.work && AREA_FORMULA[c.work]; }
 /* 계산면적 = (전체면적 + 둘레 × perim) × mult */
-function calcArea(cid,A,L,isRoof){ const w=workOfCid(cid); const f=(w&&AREA_FORMULA[w])||{perim:0,mult:1}; const pm=(isRoof && f.roofPerim!=null)?f.roofPerim:f.perim; const ml=isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1); return (evalExpr(A)+evalExpr(L)*num(pm))*num(ml||1); }
+function calcArea(cid,A,L,isRoof){ const w=workOfCid(cid); const f=(w&&AREA_FORMULA[w])||{perim:0,mult:1}; const pm=(isRoof && f.roofPerim!=null)?f.roofPerim:f.perim; const ml=(w==='drain')?1:(isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1)); return (evalExpr(A)+evalExpr(L)*num(pm))*num(ml||1); }   /* v8.7: 배수로는 5% 할증 없음 */
 const area = (b,cid) => (b && b.dims && b.dims[cid]) ? calcArea(cid,b.dims[cid].A,b.dims[cid].L,false) : num(b && b.areas ? b.areas[cid] : 0);   /* 본체 면적 (전체면적·둘레 입력 시 산식 적용) */
 const roofArea = (b,cid) => (b && b.roofDims && b.roofDims[cid]) ? calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true) : num(b && b.roof ? b.roof[cid] : 0);   /* 옥탑 면적: 옥탑 둘레계수(roofPerim) 적용 */
 const areaEff = (b,cid) => area(b,cid) + roofArea(b,cid);              /* 계산용 합산(본체+옥탑, 같은 공법) */
@@ -1611,7 +1610,7 @@ function _numStr(n){ n=+n; if(!isFinite(n)) return '0'; return (Math.round(n*1e6
 function areaFormula(b, cid, isRoof){
   const w=workOfCid(cid); const f=(w&&AREA_FORMULA[w])||{perim:0,mult:1};
   const pm=(isRoof && f.roofPerim!=null)?f.roofPerim:f.perim;
-  const ml=isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1);
+  const ml=(w==='drain')?1:(isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1));   /* v8.7: 배수로는 5% 할증 없음 */
   const dim = isRoof ? (b&&b.roofDims&&b.roofDims[cid]) : (b&&b.dims&&b.dims[cid]);
   if(dim){
     const A=evalExpr(dim.A), L=evalExpr(dim.L), P=num(pm), M=num(ml||1);
@@ -1707,8 +1706,10 @@ function buildLedgerCore(recipe, target, lab, kindHint){
   const E_l = expLab.reduce((s,x)=>s+x.amount,0);
   let L = target - M - E_m - E_l;
   if(L<0){ warn=true; L=0; }
-  const specialQty=specCoeff;
+  let specialQty=specCoeff;
   let specialAmt=Math.min(Math.ceil(specCoeff*lab.special), L);
+  /* v8.7: 보통인부 금액이 특별인부보다 크면 안 됨 → 특별인부 계수를 0.001 단위로 올려서 노무비의 절반 이상을 특별인부로 (노무비 합계·실행가는 그대로) */
+  if(L-specialAmt>specialAmt && lab.special>0){ specialQty=Math.ceil(((L/2)/lab.special)*1000-1e-9)/1000; specialAmt=Math.min(Math.ceil(+(specialQty*lab.special).toFixed(6)), L); }
   const normalAmt=L-specialAmt;
   const normalQty=lab.normal?normalAmt/lab.normal:0;
   const rows=[];
@@ -1831,7 +1832,7 @@ function compute(){
       mat:_wlg.matUnit*_wq, lab:_wlg.labUnit*_wq, exp:_wlg.expUnit*_wq, sum:_wlg.unitTotal*_wq, warn:_wlg.warn };
   }
   /* 기타공사(extras)에서 벽체도포는 제외 — 위에서 별도 공종으로 처리 (중복 방지) */
-  const extraItems=extras.filter(e=>!(e&&e.n==='벽체도포')).map(e=>({...e,amt:e.q*e.p}));
+  const extraItems=extras.filter(e=>!(e&&e.n==='벽체도포'&&wallWork)).map(e=>({...e,amt:e.q*e.p}));   /* v8.7: '벽체도포 포함' 체크 → 일위대가 공종 / 체크 안 하고 기타공사에 넣으면 → 기타공사 항목 */
   const extraExp=extraItems.reduce((s,e)=>s+e.amt,0);
   const wMat=wallWork?wallWork.mat:0, wLab=wallWork?wallWork.lab:0, wExp=wallWork?wallWork.exp:0;
   const matTotal=works.reduce((s,w)=>s+w.mat,0)+wMat, labTotal=works.reduce((s,w)=>s+w.lab,0)+wLab;
@@ -2193,13 +2194,13 @@ function renderAreaCoeff(){
     +`<div class="ac-head">📐 면적 계산식 <span class="ac-sub">계산면적 = (전체면적 + 둘레 × 둘레계수) × 면적배율 — 계수는 아래에서 수정</span>`
     +`<button class="btn xs ghost" onclick="resetAreaCoeff()" style="margin-left:auto;">기본값 복원</button></div>`
     +`<div class="ac-grid">`
-    + cols.map(c=>{ const f=AREA_FORMULA[c.work]; const on5=Math.abs(num(f.mult)-1.05)<0.001; const roofOnW=(f.roof!==false); const on5r=Math.abs(num(f.roofMult!=null?f.roofMult:f.mult)-1.05)<0.001; return `<div class="ac-item">`
+    + cols.map(c=>{ const f=AREA_FORMULA[c.work]; if(c.work==='drain'){ f.mult=1; if(f.roofMult!=null) f.roofMult=1; } const on5=Math.abs(num(f.mult)-1.05)<0.001; const roofOnW=(f.roof!==false); const on5r=Math.abs(num(f.roofMult!=null?f.roofMult:f.mult)-1.05)<0.001; return `<div class="ac-item">`
         +`<div class="ac-name">${c.label}</div>`
         +`<label class="ac-f">둘레계수 <input type="number" step="0.01" class="num" value="${f.perim}" oninput="updCoeff('${c.work}','perim',this.value)"></label>`
         +(roofOnW?`<label class="ac-f">옥탑 둘레계수 <input type="number" step="0.01" class="num" value="${f.roofPerim!=null?f.roofPerim:f.perim}" oninput="updRoofCoeff('${c.work}',this.value)"></label>`:'')
-        +`<label class="ac-chk"><input type="checkbox" ${on5?'checked':''} onchange="setPct5('${c.work}',this.checked)"> 옥상 5% 할증 <span class="ac-hint">(중심선)</span></label>`
+        +(c.work==='drain'?`<div class="ac-hint" style="font-size:11px;color:var(--text-sub);margin:2px 0;">배수로는 5% 할증 없음</div>`:`<label class="ac-chk"><input type="checkbox" ${on5?'checked':''} onchange="setPct5('${c.work}',this.checked)"> 옥상 5% 할증 <span class="ac-hint">(중심선)</span></label>`)
         +`<label class="ac-chk"><input type="checkbox" ${roofOnW?'checked':''} onchange="setRoofWork('${c.work}',this.checked)"> 옥탑 칸</label>`
-        +(roofOnW?`<label class="ac-chk" style="margin-left:16px;"><input type="checkbox" ${on5r?'checked':''} onchange="setRoofPct5('${c.work}',this.checked)"> 옥탑 5% 할증</label>`:'')
+        +((roofOnW&&c.work!=='drain')?`<label class="ac-chk" style="margin-left:16px;"><input type="checkbox" ${on5r?'checked':''} onchange="setRoofPct5('${c.work}',this.checked)"> 옥탑 5% 할증</label>`:'')
         +(DORMER_WORKS.includes(c.work)?`<div class="ac-hint" style="font-size:11px;color:var(--text-sub);margin-top:2px;">뻐꾸기창은 동별로 입력(아래 동 카드)</div>`:'')
         +`<div class="ac-eq">= ${fx(c)}</div>`
       +`</div>`; }).join('')
@@ -2272,7 +2273,7 @@ function resetAreaCoeff(){
 function setWallInclude(on){
   wallInclude=!!on;
   const i=extras.findIndex(e=>e.n==='벽체도포');
-  if(i>=0){ extras[i].manualQ=false; if(!wallInclude) extras[i].q=0; }
+  if(i>=0){ if(!wallInclude && !extras[i].manualQ) extras[i].q=0; extras[i].manualQ=false; }   /* 해제 시 자동 물량만 0 (직접 입력한 물량은 기타공사로 남김) */
   renderAreaCoeff(); renderBuildings(); renderExtras(); recalc();
 }
 window.setWallInclude=setWallInclude;
@@ -2320,8 +2321,45 @@ function loadPhotos(){ /* 화면을 바로 그리려고 예전 보관분을 먼�
 async function loadPhotosFor(key){ try{ const a=await NF_MEDIA.get('photos:'+key); sitePhotos=Array.isArray(a)?a:[]; }catch(e){ sitePhotos=[]; } try{ renderPhotoGrid(); }catch(_){} }
 function savePhotosTo(key){ const arr=(sitePhotos||[]).slice();
   NF_MEDIA.set('photos:'+key, arr).catch(e=>{ console.warn('[사진 저장]',e); try{ localStorage.setItem(PHOTO_KEY, JSON.stringify(arr)); }catch(_){ alert('사진을 저장하지 못했어요. 브라우저 저장공간을 확인해 주세요.'); } }); }
-function savePhotos(){ savePhotosTo(photoKeyNow()); }
+function savePhotos(){ savePhotosTo(photoKeyNow()); try{ photoShareSoon(); }catch(_){} }
 window.loadPhotosFor=loadPhotosFor;
+/* v8.7: 현장사진도 팀 공유(위성사진과 같은 방식) — 발행본 사진을 클라우드에 올려두고, 이 PC에 없으면 내려받음 → 발행이력에서 다시 열어도 안 지워지게 */
+const __photoUrlCache={};
+function photoSig(d){ let h=5381; const t=String(d||''); const step=Math.max(1,Math.floor(t.length/4000)); for(let i=0;i<t.length;i+=step){ h=((h<<5)+h+t.charCodeAt(i))>>>0; } return 'p'+h.toString(36)+'_'+t.length; }
+async function photoShareAll(key){
+  try{ if(typeof satTeamOn!=='function' || !satTeamOn() || !key || key==='__draft__') return;
+    const arr=(sitePhotos||[]).slice(); const items=[];
+    for(let i=0;i<arr.length;i++){ const v=arr[i]; if(!v||typeof v!=='string') continue; const sg=photoSig(v);
+      let url=__photoUrlCache[sg]; if(!url){ try{ url=await window.nfCloud._rtdbUploadDataUrl(v,'photo'+i+'.jpg','photo_'+key); __photoUrlCache[sg]=url; }catch(e){ continue; } }
+      items.push({i:i,url:url}); }
+    await window.nfCloud.db.collection('pour_photo').doc(key).set({items:items, ts:Date.now()});
+  }catch(e){ console.warn('[현장사진 공유]',e); }
+}
+async function photoFetchShared(key){
+  try{ if(typeof satTeamOn!=='function' || !satTeamOn() || !key || key==='__draft__') return false;
+    const snap=await window.nfCloud.db.collection('pour_photo').doc(key).get(); if(!snap||!snap.exists) return false;
+    const items=((snap.data()||{}).items)||[]; if(!items.length) return false;
+    const out=new Array(PHOTO_MAX).fill(null); let n=0;
+    for(const it of items){ if(!it||it.url==null) continue; let src=String(it.url); try{ if(src.indexOf('rtdb:')===0) src=await window.nfCloud._rtdbFetchDataUrl(src.slice(5)); }catch(_){ continue; } if(it.i>=0&&it.i<PHOTO_MAX){ out[it.i]=src; __photoUrlCache[photoSig(src)]=it.url; n++; } }
+    if(!n) return false; return out;
+  }catch(e){ console.warn('[현장사진 불러오기]',e); return false; }
+}
+let __photoShareT=null;
+function photoShareSoon(){ const k=photoKeyNow(); if(!k||k==='__draft__') return; clearTimeout(__photoShareT); __photoShareT=setTimeout(()=>photoShareAll(k),1500); }
+/* 발행본을 열었는데 이 PC에 사진이 없으면 → ① 팀 공유본 → ② 대시보드에 올린 그 현장 엑셀의 현장사진 시트에서 자동 복구 */
+async function photosRecoverFor(key, site){
+  if((sitePhotos||[]).some(Boolean)) return;
+  let got=null, from='';
+  /* ① 이 PC에 같은 현장의 다른 발행본(이전·이후 회차) 사진이 있으면 그걸로 */
+  try{ const h=(typeof loadHistory==='function')?loadHistory():[]; const same=h.filter(x=>x&&x.id!==key&&((x.meta&&(x.meta.client||x.meta.site))||'').trim()===site).sort((a,b)=>String(b.meta.issuedAt||'').localeCompare(String(a.meta.issuedAt||'')));
+    for(const x of same){ const a=await NF_MEDIA.get('photos:'+x.id); if(Array.isArray(a)&&a.some(Boolean)){ got=a.slice(); from='같은 현장 '+(x.meta.issueNo||'')+'회차'; break; } } }catch(_){}
+  if(!got){ got=await photoFetchShared(key); from='팀 공유'; }
+  if(!got){ try{ if(site && window.NF_DASH && NF_DASH.latestXlsx){ const x=await NF_DASH.latestXlsx(site); if(x&&x.buf){ const g=await photosFromXlsx(x.buf); if(g&&g.some(Boolean)){ got=g; from=x.name; } } } }catch(e){ console.warn('[사진 자동복구]',e); } }
+  if(photoKeyNow()!==key && key!==undefined && typeof loadedReportId!=='undefined' && loadedReportId && loadedReportId!==key) return;   /* 그 사이 다른 현장을 열었으면 중단 */
+  if(got && got.some(Boolean)){ sitePhotos=got; savePhotosTo(key); try{ renderPhotoGrid(); }catch(_){} try{ toast('✓ 현장사진 '+got.filter(Boolean).length+'장을 되살렸어요 ('+from+')'); }catch(_){} if(from!=='팀 공유') photoShareAll(key); }
+  else { try{ toast('이 발행본엔 저장된 현장사진이 없어요 — 현장사진의 ‘📥 발행 엑셀에서 불러오기’로 되살릴 수 있어요'); }catch(_){} }
+}
+window.photoShareAll=photoShareAll; window.photosRecoverFor=photosRecoverFor;
 /* v8.6: 예전 발행본 현장사진 복구 — 발행했던 엑셀의 '현장사진' 시트에서 사진 9칸을 꺼내 다시 채움 */
 async function photosFromXlsx(buf){
   const wb=new ExcelJS.Workbook(); await wb.xlsx.load(buf);
@@ -2772,6 +2810,7 @@ function loadDB(){
     /* 노무비 단가 정정 (옛 값 → 새 값) — 저장된 옛 단가를 자동으로 갱신 */
     try{ if(+LABOR.normal===172068) LABOR.normal=172698; if(+LABOR.special===226122) LABOR.special=228717; }catch(e){}
     if(o.LABOR_WORK && typeof o.LABOR_WORK==='object') LABOR_WORK=o.LABOR_WORK;
+    try{ Object.keys(LABOR_WORK||{}).forEach(k=>{ const w=LABOR_WORK[k]||{}; if(+w.sIn===226122) w.sIn=228717; if(+w.nIn===172068) w.nIn=172698; }); }catch(e){}   /* v8.7: 공법별 내부 인부단가도 새 값으로 */
     if(o.LEDGER_TGT && typeof o.LEDGER_TGT==='object') LEDGER_TGT=o.LEDGER_TGT;
     if(o.EXP_RATE && typeof o.EXP_RATE==='object') EXP_RATE=o.EXP_RATE;
     if(o.areaFormula && typeof o.areaFormula==='object'){ Object.keys(AREA_FORMULA).forEach(k=>{ const s=o.areaFormula[k]; if(s){ AREA_FORMULA[k].perim=num(s.perim); if(s.mult!=null) AREA_FORMULA[k].mult=num(s.mult); if(s.roofMult!=null) AREA_FORMULA[k].roofMult=num(s.roofMult); if(s.roof!=null) AREA_FORMULA[k].roof=!!s.roof; if(s.roofPerim!=null) AREA_FORMULA[k].roofPerim=num(s.roofPerim); } }); }
@@ -4894,8 +4933,11 @@ function restoreSnapshot(s){
   if(st.cross){ Object.keys(crossState).forEach(k=>{ if(st.cross[k]!==undefined) crossState[k]=cloneJ(st.cross[k]); }); }
   crossState.satOcr={}; crossState.satShareUrls={};
   try{ satImagesLoadFor((s&&s.id)?s.id:'__draft__'); }catch(_){ crossState.sat={}; }
-  try{ if(s&&s.id) loadPhotosFor(s.id).then(()=>{ if(!(sitePhotos||[]).some(Boolean)) try{ toast('이 발행본엔 저장된 현장사진이 없어요 — 현장사진의 ‘📥 발행 엑셀에서 불러오기’로 되살릴 수 있어요'); }catch(_){} }); }catch(_){}   /* v8.6: 발행본별 현장사진 복원 */   /* ★ 현장별로 저장해둔 위성사진 복원 (없으면 빈 상태) */
+  try{ if(s&&s.id){ const _sid=s.id, _site=((s.meta&&(s.meta.client||s.meta.site))||'').trim(); loadPhotosFor(_sid).then(()=>photosRecoverFor(_sid,_site)); } }catch(_){}   /* v8.6: 발행본별 현장사진 복원 */   /* ★ 현장별로 저장해둔 위성사진 복원 (없으면 빈 상태) */
   try{ if(typeof satFetchShared==='function' && s && s.id) satFetchShared(s.id); }catch(_){}   /* ★ 팀 공유본 있으면 다른 기기 사진도 불러옴 */
+  try{ if(s && s.id){ const _sid=s.id, _site=((s.meta&&(s.meta.client||s.meta.site))||'').trim();   /* v8.7: 이 발행본에 위성사진이 없으면 같은 현장 다른 회차에 저장된 위성사진으로 채움 */
+    __satReady.then(()=>setTimeout(()=>{ try{ if(currentSatKey()!==_sid || Object.keys(crossState.sat||{}).length) return; const st=satStoreRead(); const h=loadHistory().filter(x=>x&&x.id!==_sid&&((x.meta&&(x.meta.client||x.meta.site))||'').trim()===_site).sort((a,b)=>String(b.meta.issuedAt||'').localeCompare(String(a.meta.issuedAt||'')));
+      const keys=h.map(x=>x.id).concat(['__draft__']); for(const k of keys){ const e=st[k]; if(e&&e.sat&&Object.keys(e.sat).length){ crossState.sat=Object.assign({}, e.sat); satImagesPersist(); try{ crossRenderResults(); }catch(_){} try{ toast('✓ 위성사진을 같은 현장 이전 저장본에서 불러왔어요'); }catch(_){} break; } } }catch(_){} }, 1500)); } }catch(_){}
   /* ★ 단가 DB는 스냅샷을 복원하지 않고 '현재 마스터 DB'를 그대로 사용 → 저장된 현장도 항상 최신 단가로 재계산.
      (materialsDB · LABOR · LABOR_WORK · LEDGER_TGT · AREA_FORMULA 는 덮어쓰지 않음) */
   if($('#laborSpecial'))$('#laborSpecial').value=LABOR.special; if($('#laborNormal'))$('#laborNormal').value=LABOR.normal;
@@ -4979,19 +5021,30 @@ function issueReport(){
   try{ if(!Object.keys(crossState.sat||{}).length){ const d0=satStoreRead()[prevKey]; if(d0&&d0.sat) crossState.sat=Object.assign({}, d0.sat); } }catch(_){}   /* v8.6: 화면에 안 불러온 임시 위성사진도 발행본으로 같이 옮김(지워지지 않게) */
   loadedReportId=snap.id;
   try{ satImagesPersist(); if(prevKey==='__draft__'){ const o=satStoreRead(); delete o['__draft__']; satStoreWrite(o, snap.id); } }catch(_){}   /* ★ 발행한 현장에 위성사진 귀속 */
-  try{ savePhotosTo(snap.id); }catch(_){}   /* v8.6: 현장사진도 이 발행본에 저장 → 발행이력에서 다시 열어도 유지 */
+  try{ savePhotosTo(snap.id); photoShareAll(snap.id); }catch(_){}   /* v8.6: 현장사진도 이 발행본에 저장 → 발행이력에서 다시 열어도 유지 (v8.7: 팀 공유에도 올림) */
   try{ if(typeof satShareAll==='function') satShareAll(); }catch(_){}   /* ★ 팀 공유 연결 시 발행과 함께 위성사진 공유 */
   renderBanner(); renderHistory();
   alert('발행 완료 — '+site+' '+snap.meta.issueNo+'회차로 발행이력에 저장되었습니다.');
 }
 function renderHistory(){
-  const h=loadHistory(), el=$('#histList'); if(!el)return;
+  let h=loadHistory(); const el=$('#histList'); if(!el)return;
+  /* v8.7: 검색 + 정렬 — 현장별로 묶어 1회차→2회차… 순서대로 */
+  const hq=((document.getElementById('histSearch')||{}).value||'').trim().toLowerCase().replace(/\s+/g,'');
+  const hs=((document.getElementById('histSort')||{}).value)||'site';
+  const total=h.length;
+  if(hq) h=h.filter(s=>{ const t=[(s.meta.client||''),(s.meta.site||''),(s.meta.memo||''),fmtDate(s.meta.issuedAt),(s.meta.issueNo||'')+'회차'].join(' ').toLowerCase().replace(/\s+/g,''); return t.indexOf(hq)>=0; });
+  const ts=s=>String(s.meta.issuedAt||'');
+  if(hs==='new') h=h.slice().sort((a,b)=>ts(b).localeCompare(ts(a)));
+  else if(hs==='old') h=h.slice().sort((a,b)=>ts(a).localeCompare(ts(b)));
+  else { const nm=s=>(s.meta.client||s.meta.site||'').trim(); const last={}; h.forEach(s=>{ const k=nm(s); if(!last[k]||ts(s)>last[k]) last[k]=ts(s); });
+    h=h.slice().sort((a,b)=>(last[nm(b)]||'').localeCompare(last[nm(a)]||'') || nm(a).localeCompare(nm(b)) || ((a.meta.issueNo||0)-(b.meta.issueNo||0)) || ts(a).localeCompare(ts(b))); }   /* 최근에 발행한 현장이 위, 현장 안에서는 1회차부터 */
+  if(total && !h.length){ el.innerHTML='<div class="empty">‘'+((document.getElementById('histSearch')||{}).value||'')+'’ 검색 결과가 없어요.</div>'; return; }
   if(!h.length){ el.innerHTML='<div class="empty">아직 발행한 내역서가 없습니다. 견적 산출 화면에서 [발행 (이력 저장)]을 누르면 여기에 현장·회차별로 쌓입니다.</div>'; return; }
   el.innerHTML='<div style="overflow-x:auto;"><table><thead><tr><th class="t-left">현장명</th><th class="t-center">회차</th><th>발행일시</th><th class="t-num">총공사비</th><th>메모(수정사유)</th><th class="t-center">관리</th></tr></thead><tbody>'+
     h.map(s=>`<tr><td class="t-left">${(s.meta.client||s.meta.site||'-')}</td><td class="t-center">${s.meta.issueNo||'-'}회차</td><td>${fmtDate(s.meta.issuedAt)}</td><td class="t-num">${won((s.totals&&s.totals.total)||0)} 원</td><td><input type="text" value="${(s.meta.memo||'').replace(/"/g,'&quot;')}" placeholder="수정사유 등" oninput="updHistMemo('${s.id}',this.value)" style="min-width:150px;"></td><td class="t-center" style="white-space:nowrap;"><button class="btn xs" onclick="editFromHistory('${s.id}')">수정</button><button class="btn xs ghost" onclick="viewFromHistory('${s.id}')">보기</button><button class="btn xs ghost" onclick="exportSnapshotById('${s.id}')">.json</button><button class="btn xs ghost" onclick="deleteHistory('${s.id}')">삭제</button></td></tr>`).join('')+'</tbody></table></div>';
 }
-function editFromHistory(id){ const s=findSnap(id); if(!s)return; restoreSnapshot(s); loadedReportId=id; renderBanner(); showView('estimate'); window.scrollTo(0,0); }
-function viewFromHistory(id){ const s=findSnap(id); if(!s)return; restoreSnapshot(s); loadedReportId=id; renderBanner(); showView('estimate'); try{ const t=document.querySelector('.tab[data-tab="detail"]'); if(t)t.click(); }catch(e){} const node=$('#detailBody')||$('#quoteBody'); if(node)setTimeout(()=>node.scrollIntoView({behavior:'smooth',block:'start'}),60); }
+function editFromHistory(id){ const s=findSnap(id); if(!s)return; loadedReportId=id; restoreSnapshot(s); loadedReportId=id; renderBanner(); showView('estimate'); window.scrollTo(0,0); }
+function viewFromHistory(id){ const s=findSnap(id); if(!s)return; loadedReportId=id; restoreSnapshot(s); loadedReportId=id; renderBanner(); showView('estimate'); try{ const t=document.querySelector('.tab[data-tab="detail"]'); if(t)t.click(); }catch(e){} const node=$('#detailBody')||$('#quoteBody'); if(node)setTimeout(()=>node.scrollIntoView({behavior:'smooth',block:'start'}),60); }
 function deleteHistory(id){ if(!confirm('이 발행본을 이력에서 삭제할까요? 되돌릴 수 없습니다.'))return; nfAddDeletedHist(id); saveHistory(loadHistory().filter(s=>s.id!==id)); if(loadedReportId===id){loadedReportId=null;renderBanner();} renderHistory(); }
 function updHistMemo(id,v){ const h=loadHistory(),s=h.find(x=>x.id===id); if(s){ s.meta.memo=v; saveHistory(h); } }
 function renderBanner(){ const b=$('#loadedBanner'); if(!b)return; const s=loadedReportId?findSnap(loadedReportId):null; if(!s){ b.style.display='none'; return; } b.style.display='flex'; $('#loadedBannerText').textContent=`${s.meta.client||s.meta.site||''} ${s.meta.issueNo||''}회차 (${fmtDate(s.meta.issuedAt)}) 불러옴 — 수정 후 [발행]하면 새 회차로 저장됩니다.`; }
@@ -5340,8 +5393,9 @@ async function buildConsultingWorkbook(d){
   }
   const etcItems=[].concat(
     d.unitItems.map(u=>({n:u.label,s:'',u:u.u,q:u.qty,p:u.price,amt:u.amt,cid:u.id})),
-    d.extraItems.map(e=>({n:e.n,s:((e.preset==='base' && !e.manualQ && num(e.pct)>0) ? ((e.baseWork&&e.baseWork!=='all') ? (({shingle:'싱글',metal:'금속기와',dual:'슬라브',drain:'배수로',pvc:'PVC',metalpaint:'박공지붕도장'}[e.baseWork])||e.baseWork) : '전체') + ' ' + num(e.pct) + '%' + (e.inclRoof===false?' (옥탑 제외)':'') : (e.s||'')),   /* v8.6: 바탕정리 규격 = 기준 공법 + 비율 (예: 배수로 10%) */
-      u:e.u||'식',q:e.q,p:e.p,amt:e.amt,
+    d.extraItems.map(e=>({n:String(e.n||'').replace(/\s*\((기본|인상)\)\s*$/,''),   /* v8.7: '부대시설(기본/인상)'은 단가 구분용 — 엑셀엔 '부대시설'만 */
+      s:((e.preset==='base' && !e.manualQ && num(e.pct)>0) ? ((e.baseWork&&e.baseWork!=='all') ? (({shingle:'싱글',metal:'금속기와',dual:'슬라브',drain:'배수로',pvc:'PVC',metalpaint:'박공지붕도장'}[e.baseWork])||e.baseWork) : '전체') + ' ' + num(e.pct) + '%' + (e.inclRoof===false?' (옥탑 제외)':'') : (e.s||'')),   /* v8.6: 바탕정리 규격 = 기준 공법 + 비율 (예: 배수로 10%) */
+      u:e.u||'식',q:e.q,p:e.p,amt:e.amt, baseLink:(e.preset==='base' && !e.manualQ && num(e.pct)>0)?{bw:(e.baseWork||'all'), pct:num(e.pct), inclRoof:e.inclRoof!==false}:null,
       note:(e.preset==='base') ? (String(e.note||'몰탈미포함').replace(/^몰탈포함$/,'몰탈 포함').replace(/^몰탈미포함$/,'몰탈 미포함')) : (e.note||'')}))   /* v7.9: 비고 — 바탕정리 몰탈 포함/미포함 */
   ).filter(x=>x.amt>0||x.q>0);
   if(etcItems.length){
@@ -5352,6 +5406,7 @@ async function buildConsultingWorkbook(d){
       setF(det,dr,10,'D'+dr+'*I'+dr,it.amt); setF(det,dr,12,'D'+dr+'*K'+dr,it.amt);
       if(it.note){ const nc=det.getCell(dr,13); nc.value=it.note; nc.font={size:9}; nc.alignment={horizontal:'left',vertical:'middle',wrapText:true}; }
       if(it.cid) detUnitRow[it.cid]=dr;
+      if(it.baseLink) window.__nfBaseRow={r:dr, link:it.baseLink, q:it.q};   /* v8.7: 바탕정리 수량 → 아래에서 공법 수량 × % 수식으로 연결 */
       dr++; });
     const eBot=dr-1;
     subRow(det,dr,'소      계',null,null,etcExp,etcExp);
@@ -5432,13 +5487,23 @@ async function buildConsultingWorkbook(d){
     EBq.forEach((b,bi)=>{
       qsheet.getCell(R,1).value=b.name; qsheet.getCell(R,1).alignment={horizontal:"center",vertical:"middle"}; qsheet.getCell(R,1).font={name:FONT,size:11};
       qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); const rf=col.fx(b);
-        const dv=dV(col,b), da1=(col.dormerCid&&dv>0)?dAddr[col.dormerCid+'_'+bi]:null;   /* v8.7: 뻐꾸기창 → 같은 칸에 더함 */
-        if(kind==='base'){ let bf=rf.f ? rf.f : (rgAddr[i+'_'+bi] || null); if(da1) bf=(bf||_numStr(rf.v))+'+'+da1; cell.value = bf ? {formula:bf, result:rf.v+dv} : rf.v; baseAddr[bi+'_'+i]=cell.address; baseHasExpr[bi+'_'+i]=!!rf.f; }   /* v7.9: 숫자 직접입력 동은 산출근거 칸을 참조 → 모든 줄이 수식 */
+        const dv=0, da1=null;   /* v8.7: 뻐꾸기창은 동 칸이 아니라 표 아래 '뻐꾸기창' 줄로 */
+        if(kind==='base'){ let bf=(rgAddr[i+'_'+bi] || rf.f || null);   /* v8.7: 기본 물량 칸 = 오른쪽 산출근거 칸 참조 → 산출근거 바꾸면 같이 바뀜 */ if(da1) bf=(bf||_numStr(rf.v))+'+'+da1; cell.value = bf ? {formula:bf, result:rf.v+dv} : rf.v; baseAddr[bi+'_'+i]=cell.address; baseHasExpr[bi+'_'+i]=!!rf.f; }   /* v7.9: 숫자 직접입력 동은 산출근거 칸을 참조 → 모든 줄이 수식 */
         else { const ba=baseAddr[bi+'_'+i], sv=(rf.v+dv)*(1+col.sur/100); cell.value = ba ? {formula: ba+'*(1+'+_numStr(col.sur)+'/100)', result:sv} : sv; }   /* 뻐꾸기창 포함 면적에 할증 */
         cell.numFmt=FMT_Q2; cell.alignment={horizontal:'right',vertical:'middle'}; cell.font={name:FONT,size:11};
       });
       qsheet.getRow(R).height=20; R++;
     });
+    /* v8.7: '뻐꾸기창' 줄 — 기본 물량: (3×작은창+4×큰창) 동별 합 / 할증 후: 기본 뻐꾸기창 × (1+할증) → 전체 합계에 포함 */
+    if(qCols.some(col=>col.dormerCid && EBq.some(b=>dV(col,b)>0))){
+      qsheet.getCell(R,1).value='뻐꾸기창'; qsheet.getCell(R,1).alignment={horizontal:'center',vertical:'middle'}; qsheet.getCell(R,1).font={name:FONT,size:11};
+      qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); cell.numFmt=FMT_Q2; cell.alignment={horizontal:'right',vertical:'middle'}; cell.font={name:FONT,size:11};
+        if(!col.dormerCid) return; const dsum=EBq.reduce((s2,b)=>s2+dV(col,b),0); if(!(dsum>0)) return;
+        if(kind==='base'){ const terms=[]; EBq.forEach(b=>{ const d=(b.dormers&&b.dormers[col.dormerCid])||{}; if(num(d.small)) terms.push('3*'+num(d.small)); if(num(d.big)) terms.push('4*'+num(d.big)); });
+          cell.value={formula:'('+terms.join('+')+')', result:dsum}; baseAddr['dorm_'+i]=cell.address; }
+        else { const ba=baseAddr['dorm_'+i]; const sv=dsum*(1+col.sur/100); cell.value=ba?{formula:ba+'*(1+'+_numStr(col.sur)+'/100)', result:sv}:sv; } });
+      qsheet.getRow(R).height=20; R++;
+    }
     const dataBot=R-1;
     qsheet.getCell(R,1).value='전체'; qsheet.getCell(R,1).alignment={horizontal:'center',vertical:'middle'};
     qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); const Lc=colLetter(i+2);
@@ -5479,17 +5544,7 @@ async function buildConsultingWorkbook(d){
     const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'}; const tv=qsheet.getCell(RR,RC0+1); tv.value=(rBot>=rTop)?{formula:'SUM('+rL+rTop+':'+rL+rBot+')', result:rSum}:rSum;   /* v7.9: 산출근거 합계도 SUM 수식 */ tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=20;
     frame(qsheet,top,RC0,RR,RC0+1); RR+=2;
   });
-  /* v8.7: 뻐꾸기창 근거 — 동별 (3×작은창 + 4×큰창), 싱글 칸에 더해져 할증 같이 적용 */
-  dormerCats.forEach(c=>{ const top=RR; const lbl=(dormerCats.length>1?(c.label+' 뻐꾸기창'):'뻐꾸기창');
-    qsheet.mergeCells(RR,RC0,RR,RC0+1); const h=qsheet.getCell(RR,RC0); h.value=lbl; h.font={name:FONT,bold:true,size:11,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,RC0+1,'FFEAF3F0'); qsheet.getRow(RR).height=20; RR++;
-    const d1=qsheet.getCell(RR,RC0); d1.value='동'; const d2=qsheet.getCell(RR,RC0+1); d2.value='물량(㎡)'; [d1,d2].forEach(cc=>{ cc.font={name:FONT,bold:true,size:10}; cc.alignment={horizontal:'center',vertical:'middle'}; }); fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=19; RR++;
-    const rTop=RR; let tot=0;
-    EBq.forEach((b,bi)=>{ const v=dormerAreaB(b,c.id); if(!(v>0)) return; const d=(b.dormers&&b.dormers[c.id])||{}; const pt=[]; if(num(d.small)) pt.push('3*'+num(d.small)); if(num(d.big)) pt.push('4*'+num(d.big));
-      const nc=qsheet.getCell(RR,RC0); nc.value=b.name; nc.alignment={horizontal:'center',vertical:'middle'}; nc.font={name:FONT,size:10};
-      const vc=qsheet.getCell(RR,RC0+1); vc.value={formula:'('+pt.join('+')+')', result:v}; vc.numFmt=FMT_Q3; vc.alignment={horizontal:'right',vertical:'middle'}; vc.font={name:FONT,size:10}; qsheet.getRow(RR).height=18; tot+=v; RR++; });
-    const rL=colLetter(RC0+1); const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'};
-    const tv=qsheet.getCell(RR,RC0+1); tv.value={formula:'SUM('+rL+rTop+':'+rL+(RR-1)+')', result:tot}; tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=20;
-    frame(qsheet,top,RC0,RR,RC0+1); RR+=2; });
+  /* v8.7: 뻐꾸기창 근거는 왼쪽 표 '뻐꾸기창' 줄 수식에 (3×작은창+4×큰창) */
   R=Math.max(leftBottom, RR)+1;
   /* v7.9: 산출내역서 수량 = 물량산출내역서 '할증 후 전체' 합(+뻐꾸기창) → 물량 바꾸면 산출내역서·집계표·원가계산서까지 자동 연동 */
   try{
@@ -5509,6 +5564,11 @@ async function buildConsultingWorkbook(d){
       setFK(det,rr,4,idx.map(i=>"'물량산출내역서'!"+surTotAddr[i]).join('+'),exp);
     });
   }catch(e){ console.warn('[수량 연동]',e); }
+  /* v8.7: 바탕정리 수량 = 기준 공법 수량(산출내역서 D칸) × % — 배수로 물량이나 %가 바뀌면 같이 바뀜 */
+  try{ const br=window.__nfBaseRow; window.__nfBaseRow=null;
+    if(br && br.link && br.link.inclRoof){ const ks=used.filter(w=>detQty[w.key] && (br.link.bw==='all' || w.key===br.link.bw)).map(w=>w.key);
+      if(ks.length){ const sm=ks.reduce((a,k)=>a+(cellNum(det.getCell(detQty[k].hdr,4))||0),0); const v=Math.round(sm*br.link.pct/100*100)/100;
+        if(Math.abs(v-num(br.q))<0.005){ det.getCell(br.r,4).value={formula:'ROUND(('+ks.map(k=>'$D$'+detQty[k].hdr).join('+')+')*'+_numStr(br.link.pct)+'/100,2)', result:v}; } } } }catch(e){ console.warn('[바탕정리 연결]',e); }
 
   /* 7) 현장사진 — 3×3 사진 박스 (원본 현장사진 레이아웃 복제) */
   const photo=wb.addWorksheet('현장사진');
@@ -7803,6 +7863,48 @@ async function nfUpgradeEstimateXlsx(buf){
         const cand=subs.filter(x=>!used2.has(x.r) && Math.abs(x.v-gv)<0.01); if(!cand.length) continue;
         const best=cand.find(x=>x.nm && b.indexOf(x.nm)>=0) || cand[0]; used2.add(best.r);
         gc.value={formula:"'일위대가표'!L"+best.r, result:gv}; added++; } } }catch(e){ console.warn('[실행가 연결]',e); }
+  /* v8.7 (1) 물량산출 — 기본 물량 칸 = 오른쪽 산출근거 칸 참조 (산출근거 바꾸면 같이 바뀜) · 할증 후 '전체' = 동별 할증 칸 합계 */
+  try{ const qs=wb.getWorksheet('물량산출내역서'); if(qs){
+    let rc=0; qs.eachRow((row,r)=>row.eachCell((cell,c)=>{ if(!rc && String(val(cell)).replace(/\s/g,'')==='산출근거') rc=c; }));
+    const hdrs=[]; for(let r=1;r<=Math.min(qs.rowCount,200);r++){ if(String(val(qs.getCell(r,1))||'').trim()==='동') hdrs.push(r); }
+    const bH=hdrs[0], sH=hdrs[1];
+    const rowsUnder=h=>{ const o=[]; for(let r=h+1;r<=qs.rowCount;r++){ const dn=String(val(qs.getCell(r,1))||'').trim(); if(!dn||dn==='전체'||dn==='총물량') break; o.push(r); } return o; };
+    const totUnder=h=>{ for(let r=h+1;r<=qs.rowCount;r++){ if(String(val(qs.getCell(r,1))||'').trim()==='전체') return r; } return 0; };
+    if(bH){ const mRows=rowsUnder(bH); const mCols=[]; for(let c=2;c<(rc||30);c++){ const h=String(val(qs.getCell(bH,c))||'').trim(); if(!h) break; mCols.push({c, label:h.replace(/\s*\(㎡\)\s*$/,'').trim()}); }
+      if(rc){ const secs=[]; let cur=null;
+        for(let r=1;r<=qs.rowCount;r++){ const t=String(val(qs.getCell(r,rc))||'').trim(); const v=qs.getCell(r,rc+1);
+          if(!t||t.replace(/\s/g,'')==='산출근거') continue;
+          const nextT=String(val(qs.getCell(r+1,rc))||'').trim();
+          if(t!=='동' && t!=='합계' && (nextT==='동' || (String(val(v)||'').trim()===t && typeof val(v)==='string'))){ cur={label:t, hdr:null, rows:[]}; secs.push(cur); continue; }
+          if(!cur) continue; if(t==='동'){ cur.hdr=r; continue; } if(t==='합계'){ cur=null; continue; } cur.rows.push(r); }
+        secs.forEach(sec=>{ const mc=mCols.find(m=>m.label===sec.label)||mCols.find(m=>m.label.indexOf(sec.label)>=0||sec.label.indexOf(m.label)>=0); if(!mc||!sec.hdr) return;
+          sec.rows.forEach(sr=>{ const nm=String(val(qs.getCell(sr,rc))||'').trim(); const mr=mRows.find(r=>String(val(qs.getCell(r,1))||'').trim()===nm); if(!mr) return;
+            const m=qs.getCell(mr,mc.c), g=qs.getCell(sr,rc+1); const mv=val(m), gv=val(g); if(typeof mv!=='number'||typeof gv!=='number'||Math.abs(mv-gv)>0.001) return;
+            const gAddr=qs.getColumn(rc+1).letter+sr; if(isF(m) && String(m.value.formula).replace(/\$/g,'')===gAddr) return;
+            if(isF(m) && !isF(g) && /^[\d.+\-*/()\s]+$/.test(String(m.value.formula))) g.value={formula:String(m.value.formula), result:gv};   /* 산식은 오른쪽 산출근거 칸으로 */
+            m.value={formula:gAddr, result:mv}; added++; }); }); }
+      if(sH){ const tR=totUnder(sH); const sRows=rowsUnder(sH);
+        if(tR && sRows.length) mCols.forEach(mc=>{ const tc=qs.getCell(tR,mc.c); if(!isF(tc)) return; const f=String(tc.value.formula); if(!/^ROUNDUP\([A-Z]+\$?\d+\*\(1\+[\d.]+\/100\),0\)$/i.test(f)) return;
+          let sm=0; sRows.forEach(r=>{ const x=val(qs.getCell(r,mc.c)); if(typeof x==='number') sm+=x; }); const tv=val(tc);
+          if(typeof tv==='number' && Math.ceil(Math.round(sm*10000)/10000)===tv){ const cl=qs.getColumn(mc.c).letter; tc.value={formula:'ROUNDUP(SUM('+cl+sRows[0]+':'+cl+sRows[sRows.length-1]+'),0)', result:tv}; added++; } }); }
+    } } }catch(e){ console.warn('[물량산출 연결]',e); }
+  /* v8.7 (2) 바탕정리 수량 = 기준 공법 수량 × % (값이 같을 때만) — 배수로 물량·% 바뀌면 같이 바뀜 */
+  try{ const hdrQ=[]; for(let r=4;r<=det.rowCount;r++){ const a=lab(det,r); if(/^\d+(-\d+)?\./.test(a) && !/기타공사/.test(a)){ const v=num(det,r,4); if(v!=null) hdrQ.push({r, name:a, v}); } }
+    for(let r=4;r<=det.rowCount;r++){ if(lab(det,r)!=='바탕정리') continue; const dc=det.getCell(r,4); if(isF(dc)) continue; const dv=val(dc); if(typeof dv!=='number') continue;
+      const bc=det.getCell(r,2); const bv=val(bc); let pct=null, pctExpr=null, nameHint='';
+      if(typeof bv==='number' && bv>0 && bv<1){ pct=bv*100; pctExpr='B'+r; }
+      else { const m=String(bv||'').match(/([\d.]+)\s*%/); if(m){ pct=+m[1]; pctExpr=m[1]+'/100'; nameHint=String(bv).replace(/[\d.\s%()]|옥탑|제외/g,''); } }
+      const KEY={'싱글':/싱글/,'금속기와':/금속기와/,'슬라브':/듀얼|슬라브/,'배수로':/배수로/,'PVC':/PVC/i,'박공':/박공/};
+      let cands=[]; const hk=Object.keys(KEY).find(k=>nameHint.indexOf(k)>=0);
+      if(hk) cands.push(hdrQ.filter(h=>KEY[hk].test(h.name) && !(hk==='슬라브'&&/배수로/.test(h.name))));
+      hdrQ.forEach(h=>cands.push([h])); cands.push(hdrQ);
+      for(const set of cands){ if(!set||!set.length) continue; const sm=set.reduce((a,h)=>a+h.v,0); if(!(sm>0)) continue;
+        let pc=pct, pe=pctExpr, guessed=false;
+        if(pc==null){ const ratio=dv/sm*100, rr=Math.round(ratio); if(rr>=1 && rr<=100 && Math.abs(Math.round(sm*rr/100*100)/100-dv)<0.005){ pc=rr; pe=rr+'/100'; guessed=true; } else continue; }   /* 규격에 %가 없던 예전 파일 — 물량÷기준수량으로 % 찾기 */
+        if(Math.abs(Math.round(sm*pc/100*100)/100-dv)<0.005){
+          dc.value={formula:'ROUND(('+set.map(h=>'$D$'+h.r).join('+')+')*'+pe+',2)', result:dv}; added++;
+          if(guessed && (bv==null || String(bv).trim()==='')){ const nm=(set.length===1)?(Object.keys(KEY).find(k=>KEY[k].test(set[0].name) && !(k==='슬라브'&&/배수로/.test(set[0].name)))||''):'전체'; bc.value=(nm?nm+' ':'')+pc+'%'; }   /* 규격 칸에 '배수로 20%'처럼 표시 */
+          break; } } } }catch(e){ console.warn('[바탕정리 연결]',e); }
   /* 갑지 — 글씨 있는 표지로 교체 */
   let cover=false;
   if(typeof NF_UPG_COVER!=='undefined' && NF_UPG_COVER) try{ const gap=wb.getWorksheet('갑지'); const imgs=gap.getImages(); if(imgs.length && typeof POUR_COVER_B64==='string'){ const m=wb.getImage(imgs[0].imageId);
@@ -8152,6 +8254,8 @@ window.NF_DASH = {
     r.comments.push({ id:'c'+Date.now()+rand(), author:o.author||'내역서 자동화', ts:new Date().toISOString(), text:o.text||'',
       links: o.fileDataUrl?[{name:o.fileName||'내역서.xlsx', url:o.fileDataUrl}]:[] });
     if(o.reopen){ if(r.status==='draftSent') r.status='draft'; else if(r.status==='done') r.status='final'; }   /* 완료 카드면 재검토 단계로 */
+    if(o.stage==='최종본' && (r.status==='draft'||r.status==='draftSent')) r.status='final';   /* v8.7: 최종본으로 올리면 카드도 '최종본 검토'로 */
+    if(o.addNotes){ const cur=String(r.notes||'').split(/\n/).map(x=>x.trim()).filter(Boolean); String(o.addNotes).split(/\n/).map(x=>x.trim()).filter(Boolean).forEach(x=>{ if(cur.indexOf(x)<0) cur.push(x); }); r.notes=cur.join('\n'); }   /* v8.7: 검토방 추가 특이사항 → 카드 특이사항에도 반영 */
     if(o.finalAmt) r.finalAmt=o.finalAmt; if(Array.isArray(o.rates)&&o.rates.length) r.rates=o.rates;
     if(o.author){ lastAuthor=o.author; try{ await store.set(AKEY,o.author); }catch(_){} }
     await save(); render(); openDetail(r);
@@ -8164,12 +8268,12 @@ window.NF_DASH = {
     const now=new Date().toISOString();
     const rev={ id:'r'+Date.now()+rand(), site:data.site||'(현장명)', req:data.req||'', addr:data.addr||'', proj:data.proj||'', scope:data.scope||'', finalAmt:data.finalAmt||'', gong:data.gong||'POUR 슬라브',
       rates:(Array.isArray(data.rates)&&data.rates.length)?data.rates:null,
-      due:data.due||'', amt:data.amt||'', rev:'', status:'draft', notes:data.notes||data.memo||'', checks:{draft:{},final:{}},
+      due:data.due||'', amt:data.amt||'', rev:'', status:(data.stage==='최종본'?'final':'draft'), notes:data.notes||data.memo||'', checks:{draft:{},final:{}},
       comments:[{ id:'c'+Date.now()+rand(), author:'내역서 자동화', ts:now,
         text:'자동화에서 등록된 내역서입니다.'+(data.amt?(' '+data.amt):'')+(typeof NF_XL_VER!=='undefined'?(' ['+NF_XL_VER+']'):''),
         links: data.fileDataUrl?[{name:data.fileName||'내역서.xlsx', url:data.fileDataUrl}]:[] }] };
     reviews.unshift(rev);
-    await save(); render(); toast('검토방(초안 검토)에 등록되었습니다'); openDetail(rev);
+    await save(); render(); toast('검토방('+(rev.status==='final'?'최종본 검토':'초안 검토')+')에 등록되었습니다'); openDetail(rev);
   }
 };
 
@@ -8198,7 +8302,7 @@ function gatherSpecialNotes(){
     if(e.preset==='waste' || String(e.n).indexOf('폐기물')>=0) return;   /* 폐기물 비용은 특이사항에서 항상 제외 */
     if(e.preset==='base'){ if(q||num(e.pct)) out.push('바탕정리 '+(num(e.pct)||5)+'% '+(e.note?e.note:'몰탈 미포함')+' 설정'); }
     else if(e.n==='벽체도포'){ if(q) out.push('벽체도포 '+(e.s||'')+' ㎡당 '+won(e.p)+'원 설정'); }
-    else if(q){ out.push(e.n+' '+q+(e.u||'')+(e.s?(' '+e.s):'')); }
+    else if(q){ out.push(String(e.n||'').replace(/\s*\((기본|인상)\)\s*$/,'')+' '+q+(e.u||'')+(e.s?(' '+e.s):'')); }
   }); }catch(e){}
   return out.filter((v,i)=>v && out.indexOf(v)===i);
 }
@@ -8236,7 +8340,7 @@ function nfReissueDialog(site, cards, autoNotes, forced){
       +'</div></div>';
     document.body.appendChild(w);
     const $1=id=>document.getElementById(id);
-    const sync=()=>{ const c=cards.find(x=>x.id===$1('rsCard').value)||c0; $1('rsStage').value=stageOf(c); $1('rsNo').value=String((c.nX||0)+1); prev(); };
+    const sync=()=>{ const c=cards.find(x=>x.id===$1('rsCard').value)||c0; const fsv=((document.getElementById('fnStage')||{}).value||''); $1('rsStage').value=(fsv==='최종본'?'최종본':stageOf(c));   /* v8.7: 발행 화면에서 최종본을 골랐으면 최종본 */ $1('rsNo').value=String((c.nX||0)+1); prev(); };
     const prev=()=>{ const st=$1('rsStage').value, no=($1('rsNo').value===''?'1':$1('rsNo').value); let nm=''; try{ const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo'); const o=[fs&&fs.value,fk&&fk.value,fn&&fn.value]; if(fs)fs.value=st; if(fk)fk.value=(parseInt(no,10)===0?'':'차');   /* v8.6: 0차 = '초안본'/'최종본' 그대로 */ if(fn)fn.value=no; nm=buildEstimateFileName()+'.xlsx'; if(fs)fs.value=o[0]; if(fk)fk.value=o[1]; if(fn)fn.value=o[2]; }catch(_){}
       $1('rsFile').innerHTML='올라갈 파일: <b style="color:#1E9E5A;">'+esc1(nm)+'</b>'; };
     $1('rsCard').onchange=sync; $1('rsStage').onchange=prev; $1('rsNo').oninput=prev; sync();
@@ -8303,13 +8407,14 @@ window.sendToReviewBoard = async function(forceRevise){
           if(fs) fs.value=choice.stage; if(fk) fk.value=(choice.no===0?'':'차'); if(fn) fn.value=String(choice.no||1); try{ fnPreview(); }catch(_){}
           const fname2=buildEstimateFileName()+'.xlsx';
           const dataUrl2=await buildEstimateDataURL();
-          await window.NF_DASH.addRevision({ id:choice.id, author:choice.author, text:choice.text, title:choice.title, reopen:choice.reopen, fileName:fname2, fileDataUrl:dataUrl2, finalAmt, rates });
+          const addBlk=addLines.join('\n'); let txt2=choice.text||''; if(addBlk && txt2.indexOf(addBlk)<0) txt2+=(txt2?'\n':'')+'[검토방 추가 특이사항]\n'+addBlk;   /* v8.7: 추가 특이사항은 항상 같이 올림 */
+          await window.NF_DASH.addRevision({ id:choice.id, author:choice.author, text:txt2, title:choice.title, reopen:choice.reopen, stage:choice.stage, addNotes:addBlk, fileName:fname2, fileDataUrl:dataUrl2, finalAmt, rates });
           if(window.showView) showView('dash');
           return;
         }
       }
     }catch(e){ console.warn('[재발행 확인]',e); }
-    await window.NF_DASH.addReview({ site:site||'(발주처 미입력)', req, addr, proj:project, scope, finalAmt, due, gong:'POUR', rates, notes, fileName:fname, fileDataUrl:dataUrl });
+    await window.NF_DASH.addReview({ site:site||'(발주처 미입력)', req, addr, proj:project, scope, finalAmt, due, gong:'POUR', rates, notes, stage:((document.getElementById('fnStage')||{}).value||''), fileName:fname, fileDataUrl:dataUrl });
     if(window.showView) showView('dash');
   }catch(e){ alert('검토방 등록 오류: '+(e&&e.message?e.message:e)); }
 };
