@@ -5041,8 +5041,35 @@ function renderHistory(){
   if(total && !h.length){ el.innerHTML='<div class="empty">‘'+((document.getElementById('histSearch')||{}).value||'')+'’ 검색 결과가 없어요.</div>'; return; }
   if(!h.length){ el.innerHTML='<div class="empty">아직 발행한 내역서가 없습니다. 견적 산출 화면에서 [발행 (이력 저장)]을 누르면 여기에 현장·회차별로 쌓입니다.</div>'; return; }
   el.innerHTML='<div style="overflow-x:auto;"><table><thead><tr><th class="t-left">현장명</th><th class="t-center">회차</th><th>발행일시</th><th class="t-num">총공사비</th><th>메모(수정사유)</th><th class="t-center">관리</th></tr></thead><tbody>'+
-    h.map(s=>`<tr><td class="t-left">${(s.meta.client||s.meta.site||'-')}</td><td class="t-center">${s.meta.issueNo||'-'}회차</td><td>${fmtDate(s.meta.issuedAt)}</td><td class="t-num">${won((s.totals&&s.totals.total)||0)} 원</td><td><input type="text" value="${(s.meta.memo||'').replace(/"/g,'&quot;')}" placeholder="수정사유 등" oninput="updHistMemo('${s.id}',this.value)" style="min-width:150px;"></td><td class="t-center" style="white-space:nowrap;"><button class="btn xs" onclick="editFromHistory('${s.id}')">수정</button><button class="btn xs ghost" onclick="viewFromHistory('${s.id}')">보기</button><button class="btn xs ghost" onclick="exportSnapshotById('${s.id}')">.json</button><button class="btn xs ghost" onclick="deleteHistory('${s.id}')">삭제</button></td></tr>`).join('')+'</tbody></table></div>';
+    h.map(s=>`<tr><td class="t-left">${(s.meta.client||s.meta.site||'-')} <button class="btn xs ghost" title="현장명 바꾸기 (같은 이름 발행본 골라서)" onclick="nfHistRenameAsk('${String(s.meta.client||s.meta.site||'').replace(/'/g,"\\'")}',null,null,'${s.id}')" style="padding:0 5px;">✏</button></td><td class="t-center">${s.meta.issueNo||'-'}회차</td><td>${fmtDate(s.meta.issuedAt)}</td><td class="t-num">${won((s.totals&&s.totals.total)||0)} 원</td><td><input type="text" value="${(s.meta.memo||'').replace(/"/g,'&quot;')}" placeholder="수정사유 등" oninput="updHistMemo('${s.id}',this.value)" style="min-width:150px;"></td><td class="t-center" style="white-space:nowrap;"><button class="btn xs" onclick="editFromHistory('${s.id}')">수정</button><button class="btn xs ghost" onclick="viewFromHistory('${s.id}')">보기</button><button class="btn xs ghost" onclick="exportSnapshotById('${s.id}')">.json</button><button class="btn xs ghost" onclick="deleteHistory('${s.id}')">삭제</button></td></tr>`).join('')+'</tbody></table></div>';
 }
+/* v8.7: 발행이력 현장명 바꾸기 — 검토방 카드 이름을 바꾸면 같이 묻고, 발행이력 ✏로도 바꿈. 같은 이름 다른 현장이 있으면 골라서 */
+function nfHistRename(ids, newName){ const h=loadHistory(); let n=0; h.forEach(s=>{ if(ids.indexOf(s.id)<0) return; s.meta.client=newName; s.meta.site=newName; if(s.state){ s.state.client=newName; } n++; }); if(n){ saveHistory(h); try{ renderHistory(); }catch(_){} try{ renderBanner(); }catch(_){} try{ if(typeof loadedReportId!=='undefined' && ids.indexOf(loadedReportId)>=0){ const c=document.getElementById('client'); if(c){ c.value=newName; } } }catch(_){} } return n; }
+function nfHistRenameAsk(oldName, newName, card, focusId){
+  const norm=x=>String(x||'').replace(/\s+/g,'').toLowerCase();
+  const list=loadHistory().filter(s=>norm(s.meta.client||s.meta.site)===norm(oldName)).sort((a,b)=>((a.meta.issueNo||0)-(b.meta.issueNo||0))||String(a.meta.issuedAt||'').localeCompare(String(b.meta.issuedAt||'')));
+  if(!list.length) return;
+  /* 미리 체크: ① 이 카드로 올린 발행본 ② 카드에 적힌 금액과 같은 발행본 ③ 같은 이름 카드가 더는 없으면 전부 ④ ✏로 연 줄 */
+  const amts=new Set(); if(card){ [card.finalAmt,card.amt].concat((card.comments||[]).map(c=>(c.text||'')+' '+((c.links||[]).map(l=>l.name).join(' ')))).forEach(t=>{ String(t||'').replace(/[\d,]{5,}/g,m=>{ const v=+m.replace(/,/g,''); if(v>=100000) amts.add(v); return m; }); }); }
+  const otherSame=(window.NF_DASH&&NF_DASH.allCards)?NF_DASH.allCards().filter(c=>norm(c.site)===norm(oldName)&&(!card||c.id!==card.id)).length:0;
+  const pre=s=>{ if(card && Array.isArray(card.rptIds) && card.rptIds.indexOf(s.id)>=0) return true; if(focusId) return s.id===focusId; const t=Math.round((s.totals&&s.totals.total)||0); if(card && amts.size) return amts.has(t); return card?!otherSame:false; };
+  const esc=x=>String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const old=document.getElementById('nfHistRen'); if(old) old.remove();
+  const w=document.createElement('div'); w.id='nfHistRen'; w.style.cssText='position:fixed;inset:0;background:rgba(16,24,40,.45);z-index:140;display:flex;align-items:center;justify-content:center;padding:16px;';
+  const names=((window.NF_DASH&&NF_DASH.allCards)?NF_DASH.allCards().map(c=>c.site):[]).filter((v,i,a)=>v&&a.indexOf(v)===i);
+  w.innerHTML='<div style="background:#fff;border-radius:12px;max-width:560px;width:100%;padding:18px 18px 14px;box-shadow:0 10px 30px rgba(0,0,0,.2);max-height:86vh;overflow:auto;">'
+    +'<div style="font-size:16px;font-weight:700;margin-bottom:4px;">발행이력 현장명 바꾸기</div>'
+    +'<div style="font-size:12.5px;color:#667085;margin-bottom:10px;">‘'+esc(oldName)+'’ 이름으로 발행된 내역서 '+list.length+'건 — 바꿀 것만 체크하세요.'+(otherSame?' <b style="color:#B54708;">같은 이름 현장이 검토방에 또 있어요.</b>':'')+'</div>'
+    +'<label style="display:block;font-size:12.5px;font-weight:600;margin-bottom:4px;">새 현장명</label><input id="nfHrName" list="nfHrNames" value="'+esc(newName||'')+'" style="width:100%;padding:8px 10px;border:1px solid #D8DEE6;border-radius:8px;margin-bottom:10px;"><datalist id="nfHrNames">'+names.map(n=>'<option value="'+esc(n)+'">').join('')+'</datalist>'
+    +'<div style="border:1px solid #E4E7EC;border-radius:8px;">'+list.map(s=>'<label style="display:flex;gap:8px;align-items:center;padding:7px 10px;border-bottom:1px solid #F2F4F7;font-size:13px;cursor:pointer;"><input type="checkbox" data-hid="'+esc(s.id)+'" '+(pre(s)?'checked':'')+' style="width:auto;"> <b style="min-width:52px;">'+(s.meta.issueNo||'-')+'회차</b><span style="color:#667085;min-width:120px;">'+esc(fmtDate(s.meta.issuedAt))+'</span><span style="margin-left:auto;font-weight:600;">'+won((s.totals&&s.totals.total)||0)+'원</span>'+(s.meta.memo?'<span style="color:#98A2B3;font-size:11.5px;">· '+esc(s.meta.memo)+'</span>':'')+'</label>').join('')+'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;"><button class="btn ghost" id="nfHrNo">그대로 두기</button><button class="btn" id="nfHrGo" style="background:#394867;color:#fff;border-color:#394867;">바꾸기</button></div></div>';
+  document.body.appendChild(w);
+  w.querySelector('#nfHrNo').onclick=()=>w.remove();
+  w.querySelector('#nfHrGo').onclick=()=>{ const nn=w.querySelector('#nfHrName').value.trim(); if(!nn){ alert('새 현장명을 입력해 주세요.'); return; }
+    const ids=Array.from(w.querySelectorAll('input[data-hid]:checked')).map(x=>x.getAttribute('data-hid')); if(!ids.length){ alert('바꿀 발행본을 체크해 주세요.'); return; }
+    const n=nfHistRename(ids, nn); w.remove(); try{ toast('발행이력 '+n+'건을 ‘'+nn+'’(으)로 바꿨어요'); }catch(_){} };
+}
+window.nfHistRenameAsk=nfHistRenameAsk; window.nfHistRename=nfHistRename;
 function editFromHistory(id){ const s=findSnap(id); if(!s)return; loadedReportId=id; restoreSnapshot(s); loadedReportId=id; renderBanner(); showView('estimate'); window.scrollTo(0,0); }
 function viewFromHistory(id){ const s=findSnap(id); if(!s)return; loadedReportId=id; restoreSnapshot(s); loadedReportId=id; renderBanner(); showView('estimate'); try{ const t=document.querySelector('.tab[data-tab="detail"]'); if(t)t.click(); }catch(e){} const node=$('#detailBody')||$('#quoteBody'); if(node)setTimeout(()=>node.scrollIntoView({behavior:'smooth',block:'start'}),60); }
 function deleteHistory(id){ if(!confirm('이 발행본을 이력에서 삭제할까요? 되돌릴 수 없습니다.'))return; nfAddDeletedHist(id); saveHistory(loadHistory().filter(s=>s.id!==id)); if(loadedReportId===id){loadedReportId=null;renderBanner();} renderHistory(); }
@@ -6560,8 +6587,8 @@ function ddayInfo(due){if(!due)return null;const t=new Date();t.setHours(0,0,0,0
 function commentsFor(r){return (r.comments||[]).slice().sort((a,b)=>a.ts<b.ts?-1:1);}
 function searchText(r){return (r.site+' '+r.req+' '+r.gong+' '+(r.notes||'')+' '+(r.comments||[]).map(c=>c.author+' '+c.text).join(' ')).toLowerCase();}
 function stageOf(r){return STAGES.find(s=>s.key===r.status)||STAGES[0];}
-function mentionize(t){return esc(t).replace(/@([가-힣A-Za-z0-9_]+)/g,'<span class="mention">@$1</span>');}
-function pendingTags(r){const cs=commentsFor(r);for(let i=cs.length-1;i>=0;i--){const m=(cs[i].text||'').match(/@([가-힣A-Za-z0-9_]+)/g);if(m&&m.length)return [...new Set(m)];}return [];}
+function mentionize(t){return esc(t).replace(/(?<![A-Za-z0-9._%+\-])@([가-힣A-Za-z0-9_]+)/g,'<span class="mention">@$1</span>');}
+function pendingTags(r){const cs=commentsFor(r);for(let i=cs.length-1;i>=0;i--){const m=(cs[i].text||'').match(/(?<![A-Za-z0-9._%+\-])@([가-힣A-Za-z0-9_]+)/g);if(m&&m.length)return [...new Set(m)];}return [];}
 function insertMention(nm){const ta=$('#c_text');if(!ta)return;const v=ta.value;ta.value=(v&&!/\s$/.test(v)?v+' ':v)+'@'+nm+' ';ta.focus();}
 function rand(){return Math.random().toString(36).slice(2,9);}
 
@@ -7505,7 +7532,7 @@ async function postComment(){
   const th=$('.thread'); if(th)th.scrollTop=th.scrollHeight;
   /* ★ @팀원 태그가 있으면 잔디 검토 토픽으로 알림 발송 */
   try{
-    const tags=[...new Set((text.match(/@([가-힣A-Za-z0-9_]+)/g)||[]))];
+    const tags=[...new Set((text.match(/(?<![A-Za-z0-9._%+\-])@([가-힣A-Za-z0-9_]+)/g)||[]))];
     if(tags.length && nfHookUrl()){
       const body=tags.join(' ')+' 검토 요청 — '+(r.site||'(현장)');
       const desc=(author?('작성자: '+author+'\n'):'')+(text||'');
@@ -7905,6 +7932,9 @@ async function nfUpgradeEstimateXlsx(buf){
           dc.value={formula:'ROUND(('+set.map(h=>'$D$'+h.r).join('+')+')*'+pe+',2)', result:dv}; added++;
           if(guessed && (bv==null || String(bv).trim()==='')){ const nm=(set.length===1)?(Object.keys(KEY).find(k=>KEY[k].test(set[0].name) && !(k==='슬라브'&&/배수로/.test(set[0].name)))||''):'전체'; bc.value=(nm?nm+' ':'')+pc+'%'; }   /* 규격 칸에 '배수로 20%'처럼 표시 */
           break; } } } }catch(e){ console.warn('[바탕정리 연결]',e); }
+  /* v8.7 (3) 원가계산서 '일금 ○○ 원정' 글자가 총공사비와 다르면 맞춤 (엑셀에서 숫자만 고친 경우) */
+  try{ const e3=cost&&cost.getCell('E3'), t=cost?val(cost.getCell('D28')):null; if(e3 && typeof t==='number' && t>0){ const cur=String(val(e3)||''); const want='일금  '+koNum(t)+'  원정 (₩'+won(t)+'원)';
+      if(/^일금/.test(cur.trim()) && cur.replace(/\s/g,'')!==want.replace(/\s/g,'')){ e3.value=want; added++; } } }catch(e){ console.warn('[금액 글자]',e); }
   /* 갑지 — 글씨 있는 표지로 교체 */
   let cover=false;
   if(typeof NF_UPG_COVER!=='undefined' && NF_UPG_COVER) try{ const gap=wb.getWorksheet('갑지'); const imgs=gap.getImages(); if(imgs.length && typeof POUR_COVER_B64==='string'){ const m=wb.getImage(imgs[0].imageId);
@@ -8199,10 +8229,12 @@ async function saveForm(){
   const atts=await collectModalFiles();
   const attComment = atts.length ? {id:'c'+Date.now()+rand(),author:'등록',ts:new Date().toISOString(),text:'현장 등록 시 첨부',links:atts} : null;
   let card;
-  if(id){ const R=reviews.find(r=>r.id===id); Object.assign(R,data); if(attComment){ R.comments=R.comments||[]; R.comments.push(attComment); } card=R; }
+  let __oldSite=null;
+  if(id){ const R=reviews.find(r=>r.id===id); __oldSite=R.site; Object.assign(R,data); if(attComment){ R.comments=R.comments||[]; R.comments.push(attComment); } card=R; }
   else { data.id='r'+Date.now()+rand(); data.comments=attComment?[attComment]:[]; data.checks={draft:{},final:{}}; reviews.unshift(data); card=data; }
   try{ await maybeSheetLog(card, card.status, true); }catch(_){}   /* ★ 완료로 등록/수정해도 기록(직접 올린 카드 누락 방지) — viaSave:중복 방지 */
   await save(); closeModal(); render();
+  try{ if(__oldSite && __oldSite!==card.site && typeof window.nfHistRenameAsk==='function') window.nfHistRenameAsk(__oldSite, card.site, card); }catch(_){}   /* v8.7: 카드 현장명 바꾸면 발행이력도 같이 */
 }
 async function delForm(){
   const id=$('#f_id').value; if(!id) return;
@@ -8254,12 +8286,13 @@ window.NF_DASH = {
     r.comments.push({ id:'c'+Date.now()+rand(), author:o.author||'내역서 자동화', ts:new Date().toISOString(), text:o.text||'',
       links: o.fileDataUrl?[{name:o.fileName||'내역서.xlsx', url:o.fileDataUrl}]:[] });
     if(o.reopen){ if(r.status==='draftSent') r.status='draft'; else if(r.status==='done') r.status='final'; }   /* 완료 카드면 재검토 단계로 */
-    if(o.stage==='최종본' && (r.status==='draft'||r.status==='draftSent')) r.status='final';   /* v8.7: 최종본으로 올리면 카드도 '최종본 검토'로 */
+    if(o.stage==='최종본' && (r.status==='draft'||r.status==='draftSent')) r.status='final';
+    if(o.rptId){ r.rptIds=Array.isArray(r.rptIds)?r.rptIds:[]; if(r.rptIds.indexOf(o.rptId)<0) r.rptIds.push(o.rptId); }   /* v8.7: 이 카드로 올린 발행본 기록 → 이름 바꿀 때 같이 */   /* v8.7: 최종본으로 올리면 카드도 '최종본 검토'로 */
     if(o.addNotes){ const cur=String(r.notes||'').split(/\n/).map(x=>x.trim()).filter(Boolean); String(o.addNotes).split(/\n/).map(x=>x.trim()).filter(Boolean).forEach(x=>{ if(cur.indexOf(x)<0) cur.push(x); }); r.notes=cur.join('\n'); }   /* v8.7: 검토방 추가 특이사항 → 카드 특이사항에도 반영 */
     if(o.finalAmt) r.finalAmt=o.finalAmt; if(Array.isArray(o.rates)&&o.rates.length) r.rates=o.rates;
     if(o.author){ lastAuthor=o.author; try{ await store.set(AKEY,o.author); }catch(_){} }
     await save(); render(); openDetail(r);
-    try{ const tags=[...new Set(((o.text||'').match(/@([가-힣A-Za-z0-9_]+)/g)||[]))]; if(tags.length && nfHookUrl()){ jandiNotify(tags.join(' ')+' 재발행 검토 요청 — '+(r.site||'(현장)'), {title:'📋 '+(r.site||'현장')+' '+(o.title||'수정본 재발행'), desc:((o.author?('작성자: '+o.author+'\n'):'')+(o.text||'')).slice(0,300)}); } }catch(_){}
+    try{ const tags=[...new Set(((o.text||'').match(/(?<![A-Za-z0-9._%+\-])@([가-힣A-Za-z0-9_]+)/g)||[]))]; if(tags.length && nfHookUrl()){ jandiNotify(tags.join(' ')+' 재발행 검토 요청 — '+(r.site||'(현장)'), {title:'📋 '+(r.site||'현장')+' '+(o.title||'수정본 재발행'), desc:((o.author?('작성자: '+o.author+'\n'):'')+(o.text||'')).slice(0,300)}); } }catch(_){}
     toast('‘'+(r.site||'현장')+'’ 카드에 '+(o.title||'수정본')+'을(를) 올렸어요 — 최신 내역서로 표시됩니다');
     return true;
   },
@@ -8268,6 +8301,7 @@ window.NF_DASH = {
     const now=new Date().toISOString();
     const rev={ id:'r'+Date.now()+rand(), site:data.site||'(현장명)', req:data.req||'', addr:data.addr||'', proj:data.proj||'', scope:data.scope||'', finalAmt:data.finalAmt||'', gong:data.gong||'POUR 슬라브',
       rates:(Array.isArray(data.rates)&&data.rates.length)?data.rates:null,
+      rptIds:(data.rptId?[data.rptId]:[]),
       due:data.due||'', amt:data.amt||'', rev:'', status:(data.stage==='최종본'?'final':'draft'), notes:data.notes||data.memo||'', checks:{draft:{},final:{}},
       comments:[{ id:'c'+Date.now()+rand(), author:'내역서 자동화', ts:now,
         text:'자동화에서 등록된 내역서입니다.'+(data.amt?(' '+data.amt):'')+(typeof NF_XL_VER!=='undefined'?(' ['+NF_XL_VER+']'):''),
@@ -8408,13 +8442,13 @@ window.sendToReviewBoard = async function(forceRevise){
           const fname2=buildEstimateFileName()+'.xlsx';
           const dataUrl2=await buildEstimateDataURL();
           const addBlk=addLines.join('\n'); let txt2=choice.text||''; if(addBlk && txt2.indexOf(addBlk)<0) txt2+=(txt2?'\n':'')+'[검토방 추가 특이사항]\n'+addBlk;   /* v8.7: 추가 특이사항은 항상 같이 올림 */
-          await window.NF_DASH.addRevision({ id:choice.id, author:choice.author, text:txt2, title:choice.title, reopen:choice.reopen, stage:choice.stage, addNotes:addBlk, fileName:fname2, fileDataUrl:dataUrl2, finalAmt, rates });
+          await window.NF_DASH.addRevision({ id:choice.id, author:choice.author, text:txt2, title:choice.title, reopen:choice.reopen, stage:choice.stage, addNotes:addBlk, rptId:(typeof loadedReportId!=='undefined'?loadedReportId:null), fileName:fname2, fileDataUrl:dataUrl2, finalAmt, rates });
           if(window.showView) showView('dash');
           return;
         }
       }
     }catch(e){ console.warn('[재발행 확인]',e); }
-    await window.NF_DASH.addReview({ site:site||'(발주처 미입력)', req, addr, proj:project, scope, finalAmt, due, gong:'POUR', rates, notes, stage:((document.getElementById('fnStage')||{}).value||''), fileName:fname, fileDataUrl:dataUrl });
+    await window.NF_DASH.addReview({ site:site||'(발주처 미입력)', req, addr, proj:project, scope, finalAmt, due, gong:'POUR', rates, notes, stage:((document.getElementById('fnStage')||{}).value||''), rptId:(typeof loadedReportId!=='undefined'?loadedReportId:null), fileName:fname, fileDataUrl:dataUrl });
     if(window.showView) showView('dash');
   }catch(e){ alert('검토방 등록 오류: '+(e&&e.message?e.message:e)); }
 };
