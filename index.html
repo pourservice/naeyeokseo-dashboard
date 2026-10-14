@@ -5402,12 +5402,14 @@ async function buildConsultingWorkbook(d){
   qsheet.mergeCells(1,1,1,LASTCOL); const qt=qsheet.getCell(1,1); qt.value='물 량 산 출 내 역 서'; qt.font={name:FONT,bold:true,size:20}; qt.alignment={horizontal:'center',vertical:'middle'}; qsheet.getRow(1).height=34;
   qsheet.getCell('A2').value='단지명 :'; qsheet.getCell('A2').font={name:FONT,bold:true,size:11}; qsheet.getCell('B2').value=clientName; qsheet.getCell('B2').font={name:FONT,size:11}; qsheet.getRow(2).height=20;
   const topRow=4; let R=topRow;
-  const EBq=expandedBuildings();   /* 한 칸에 여러 동 입력 시 개별 동으로 펼침 */
+  /* 한 칸에 여러 동 입력 시 개별 동으로 펼침 — v8.6: 물량이 하나도 없는 동(빈 동·남은 기본 동)은 엑셀에서 뺌 */
+  const qNz=(col,b)=>{ try{ return (num(col.fx(b).v)>0) || (num(col.get(b))>0); }catch(e){ return false; } };
+  const EBall=expandedBuildings(); const EBq=EBall.filter(b=>qCols.some(col=>qNz(col,b))); if(!EBq.length) EBq.push(...EBall);
   /* 섹션 렌더 헬퍼 */
   const colLetter=c=>qsheet.getColumn(c).letter;
   const baseAddr={}, baseTotAddr={}, surTotAddr={}, baseHasExpr={};
   /* v7.9: 산출근거(오른쪽) 각 동 칸 주소를 미리 계산 — 아래 산출근거 배치 규칙과 동일 */
-  const rgAddr={}; { let rr=topRow+1; qCols.forEach((col,ci)=>{ EBq.forEach((b,bi)=>{ rgAddr[ci+'_'+bi]=colLetter(RC0+1)+(rr+2+bi); }); rr+=EBq.length+4; }); }   /* `bi_ci` → 기본물량 셀 주소 (할증후가 수식으로 참조) */
+  const rgAddr={}; { let rr=topRow+1; qCols.forEach((col,ci)=>{ let k=0; EBq.forEach((b,bi)=>{ if(!qNz(col,b)) return; rgAddr[ci+'_'+bi]=colLetter(RC0+1)+(rr+2+k); k++; }); rr+=k+4; }); }   /* v8.6: 산출근거는 그 공종 물량이 있는 동만 */   /* `bi_ci` → 기본물량 셀 주소 (할증후가 수식으로 참조) */
   function qtyTable(title, headerFn, kind){
     const secTop=R;
     qsheet.mergeCells(R,1,R,LC); const sb=qsheet.getCell(R,1); sb.value=title; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'left',vertical:'middle',indent:1}; fillRow(R,1,LC,'FFCFE9E3'); qsheet.getRow(R).height=22; R++;
@@ -5458,7 +5460,7 @@ async function buildConsultingWorkbook(d){
     const d1=qsheet.getCell(RR,RC0); d1.value='동'; const d2=qsheet.getCell(RR,RC0+1); d2.value='물량(㎡)'; [d1,d2].forEach(cc=>{ cc.font={name:FONT,bold:true,size:10}; cc.alignment={horizontal:'center',vertical:'middle'}; }); fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=19; RR++;
     const rTop=RR;
     const ci=qCols.indexOf(col);
-    EBq.forEach((b,bi)=>{ const nc=qsheet.getCell(RR,RC0); nc.value=b.name; nc.alignment={horizontal:'center',vertical:'middle'}; nc.font={name:FONT,size:10}; const vc=qsheet.getCell(RR,RC0+1); const gv=col.get(b); const rf=col.fx(b); vc.value=(rf.f && baseHasExpr[bi+'_'+ci]) ? {formula:rf.f, result:rf.v} : gv;   /* v8.4: 산식 있는 동은 산식 그대로(칸 누르면 계산식 보임), 숫자 입력 동은 여기가 입력칸 */
+    EBq.forEach((b,bi)=>{ if(!qNz(col,b)) return; const nc=qsheet.getCell(RR,RC0); nc.value=b.name; nc.alignment={horizontal:'center',vertical:'middle'}; nc.font={name:FONT,size:10}; const vc=qsheet.getCell(RR,RC0+1); const gv=col.get(b); const rf=col.fx(b); vc.value=(rf.f && baseHasExpr[bi+'_'+ci]) ? {formula:rf.f, result:rf.v} : gv;   /* v8.4: 산식 있는 동은 산식 그대로(칸 누르면 계산식 보임), 숫자 입력 동은 여기가 입력칸 */
       vc.numFmt=FMT_Q3; vc.alignment={horizontal:'right',vertical:'middle'}; vc.font={name:FONT,size:10}; qsheet.getRow(RR).height=18; RR++; });
     const rBot=RR-1, rL=colLetter(RC0+1), rSum=EBq.reduce((s,b)=>s+col.get(b),0);
     const tl=qsheet.getCell(RR,RC0); tl.value='합계'; tl.font={name:FONT,bold:true,size:10}; tl.alignment={horizontal:'center',vertical:'middle'}; const tv=qsheet.getCell(RR,RC0+1); tv.value=(rBot>=rTop)?{formula:'SUM('+rL+rTop+':'+rL+rBot+')', result:rSum}:rSum;   /* v7.9: 산출근거 합계도 SUM 수식 */ tv.numFmt=FMT_Q3; tv.font={name:FONT,bold:true,size:10}; tv.alignment={horizontal:'right',vertical:'middle'}; fillRow(RR,RC0,RC0+1); qsheet.getRow(RR).height=20;
@@ -7302,7 +7304,9 @@ function __renderDetailInner(){
     <div class="cmt">
       <div class="c-top"><span class="c-author">${esc(c.author)}</span><span class="c-time">${timeLbl}</span>${tools}</div>
       ${bodyHtml}
-      ${(c.links&&c.links.length)?`<div class="c-files fcards">${c.links.map((l,j)=>fileCard(l,(c.id===lfCid&&j===lfIdx))).join('')}</div>`:''}
+      ${editing
+        ? `<div class="c-files fcards">${(c.links||[]).map((l,j)=>`<div style="display:flex;align-items:center;gap:6px;">${fileCard(l,(c.id===lfCid&&j===lfIdx))}<button class="mini-btn" data-cfrep="${c.id}|${j}" title="이 파일을 새 파일로 갈아끼우기">🔁 교체</button><button class="mini-btn" data-cfdel="${c.id}|${j}" title="이 댓글에서 파일 빼기" style="color:#B33;">✕ 빼기</button></div>`).join('')}<div><button class="mini-btn" data-cfadd="${c.id}">＋ 파일 추가</button></div></div>`
+        : ((c.links&&c.links.length)?`<div class="c-files fcards">${c.links.map((l,j)=>fileCard(l,(c.id===lfCid&&j===lfIdx))).join('')}</div>`:'')}
     </div>`;
   }).join(''):'<div class="thread-empty">아직 댓글이 없습니다. 아래에서 첫 코멘트나 파일을 올려보세요.</div>';
   $('#detailModal').innerHTML=`
@@ -7374,6 +7378,20 @@ function __renderDetailInner(){
   $('#detailModal').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delComment(r,b.dataset.del));
   $('#detailModal').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{ editingCmtId=b.dataset.edit; renderDetail(); setTimeout(()=>{ const ta=$('#cEditTa_'+editingCmtId); if(ta){ ta.focus(); ta.setSelectionRange(ta.value.length,ta.value.length); } },30); });
   $('#detailModal').querySelectorAll('[data-editcancel]').forEach(b=>b.onclick=()=>{ editingCmtId=null; renderDetail(); });
+  /* v8.6: 댓글 수정 중 첨부 파일 갈아끼우기·빼기·추가 */
+  const pickFiles=(multi)=>new Promise(res=>{ const inp=document.createElement('input'); inp.type='file'; if(multi) inp.multiple=true; inp.onchange=()=>res([...(inp.files||[])]); inp.click(); });
+  const upOne=async f=>{ try{ f=await nfMaybeShrink(f); }catch(_){} toast('⬆ '+f.name+' 올리는 중…'); return await nfUploadAttachment(f, r.id); };
+  const keepText=()=>{ const ta=$('#cEditTa_'+editingCmtId); return ta?ta.value:null; };
+  const afterFile=async(c,t)=>{ if(t!=null) c.text=t.trim(); c.edited=new Date().toISOString(); await save(); renderDetail(); render(); };
+  $('#detailModal').querySelectorAll('[data-cfrep]').forEach(b=>b.onclick=async()=>{ const [cid,j]=b.dataset.cfrep.split('|'); const cur=reviews.find(x=>x.id===r.id)||r; const c=(cur.comments||[]).find(x=>String(x.id)===cid); if(!c||!c.links||!c.links[+j]) return;
+    const fs=await pickFiles(false); if(!fs.length) return; const t=keepText();
+    try{ const up=await upOne(fs[0]); const old=c.links[+j]; c.links[+j]=Object.assign({}, up, {prevUrl:old.url, prevName:old.name}); await afterFile(c,t); toast('✓ 파일을 교체했어요: '+up.name); }catch(e){ alert('파일 교체 실패: '+(e&&e.message||e)); } });
+  $('#detailModal').querySelectorAll('[data-cfdel]').forEach(b=>b.onclick=async()=>{ const [cid,j]=b.dataset.cfdel.split('|'); const cur=reviews.find(x=>x.id===r.id)||r; const c=(cur.comments||[]).find(x=>String(x.id)===cid); if(!c||!c.links||!c.links[+j]) return;
+    if(!confirm('‘'+(c.links[+j].name||'파일')+'’을(를) 이 댓글에서 뺄까요?')) return; const t=keepText(); c.links.splice(+j,1); await afterFile(c,t); toast('파일을 뺐어요'); });
+  $('#detailModal').querySelectorAll('[data-cfadd]').forEach(b=>b.onclick=async()=>{ const cid=b.dataset.cfadd; const cur=reviews.find(x=>x.id===r.id)||r; const c=(cur.comments||[]).find(x=>String(x.id)===cid); if(!c) return;
+    const fs=await pickFiles(true); if(!fs.length) return; const t=keepText(); c.links=c.links||[];
+    for(const f of fs){ try{ c.links.push(await upOne(f)); }catch(e){ alert('‘'+f.name+'’ 첨부 실패: '+(e&&e.message||e)); } }
+    await afterFile(c,t); toast('✓ 파일 '+fs.length+'개를 붙였어요'); });
   $('#detailModal').querySelectorAll('[data-editsave]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.editsave; const ta=$('#cEditTa_'+id); if(!ta) return; const nv=(ta.value||'').trim(); const c=(r.comments||[]).find(x=>String(x.id)===String(id)); if(c){ c.text=nv; c.edited=new Date().toISOString(); } editingCmtId=null; await save(); renderDetail(); render(); toast('댓글을 수정했어요.'); });
   wireChecks($('#detailModal'),r);
   const tagBtn=$('#cTag'), tagList=$('#tagList');
