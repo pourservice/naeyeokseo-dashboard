@@ -1236,6 +1236,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <button class="btn btn-ghost" id="shareBtn" onclick="openShare()" title="팀원과 실시간으로 검토방을 공유합니다">🔗 팀 공유</button>
     <button class="btn btn-ghost" id="gdMigBtn" onclick="nfGdMigrateAll()" title="기존 첨부를 구글 드라이브로 옮기고, 모든 드라이브 파일을 '링크 있는 사람 누구나 보기'로 공개 → 팀원 누구나 로그인 없이 다운로드">📦 드라이브 이관·공개</button>
     <button class="btn btn-ghost" id="xlUpgBtn" onclick="nfUpgradeAllEstimates()" title="예전 버전으로 만든 내역서 엑셀에 시트 간 수식 연결·합계 수식·갑지 글씨를 넣어 같은 자리에서 교체 (금액 변경 없음)">🔧 엑셀 최신양식</button>
+    <button class="btn btn-ghost" onclick="nfStripAllCalcCols()" title="물량산출내역서 오른쪽 ‘산출식’ 글자 칸만 지워요 (다른 칸·금액은 그대로)">🧹 산출식 칸 지우기</button>
     <button class="btn btn-ghost" id="xlsBtn">⬇ 현황표</button>
     <button class="btn btn-primary" id="addBtn">＋ 새 현장</button>
   </div>
@@ -6799,9 +6800,9 @@ async function nfCtParseFile(file){
     const find=(re,not)=>H.findIndex(h=>h && re.test(h) && !(not&&not.test(h)));
     const emailCols=H.map((h,i)=>(h&&/메일|e-?mail/i.test(h))?i:-1).filter(i=>i>=0);
     const cC=find(/회사|업체|거래처|소속|조직|단체|company|organization/i,/주소|전화|팩스|fax|phone|tel|우편|홈페이지/i);
-    const cN=find(/^(이름|성명|name|표시\s*이름|display\s*name|담당자)$/i);
+    const cN=find(/^(이름|성명|name|표시\s*이름|display\s*name|담당자|대표자|대표|대표자명)$/i);
     const cLast=find(/^(성|last\s*name)$/i), cFirst=find(/^(이름|first\s*name)$/i);
-    const cD=find(/부서|department/i), cT=find(/직책|직위|직급|job\s*title|^title$/i), cG=find(/그룹|group|분류/i);
+    const cD=find(/부서|department/i), cT=find(/직책|직위|직급|job\s*title|^title$/i), cG=find(/그룹|group|분류|지역/i);
     for(let i=hi+1;i<rows.length;i++){ const row=rows[i]||[]; const g=k=>k>=0?String(row[k]||'').trim():'';
       let n=g(cN); if(!n && (cLast>=0||cFirst>=0)) n=(g(cLast)+g(cFirst)).trim();
       const emails=[]; emailCols.forEach(k=>{ (String(row[k]||'').match(NF_EMAIL_RE)||[]).forEach(e=>emails.push(e)); });
@@ -6811,6 +6812,7 @@ async function nfCtParseFile(file){
   const seen=new Map(); list.forEach(x=>{ const k=String(x.e).toLowerCase(); const p=seen.get(k); if(!p || (!p.c&&x.c) || (!p.n&&x.n)) seen.set(k,x); });
   return [...seen.values()];
 }
+try{ window.nfCtParseFile=nfCtParseFile; window.nfCtSearch=nfCtSearch; }catch(_){}
 function nfCtDialog(onDone){
   const old=document.getElementById('nfCt'); if(old) old.remove();
   const w=document.createElement('div'); w.id='nfCt';
@@ -7022,17 +7024,24 @@ function nfMailDialog(r,f0){
       const MB=1048576, fmtMB=n=>(n/MB).toFixed(1)+'MB';
       const parts=[], upLinks=[]; let inline=0, total=0, cardChanged=false; const big=[];
       for(let i=0;i<atts.length;i++){ const a=atts[i]; const nm=attName(a); btn.textContent='첨부 준비 중… ('+(i+1)+'/'+atts.length+') '+nm;
+        if(a.f && /\.xlsx$/i.test(a.f.name||'') && !a.f.calcColChecked){   /* v8.6: 메일 보내기 전 '산출식' 글자 칸이 있으면 지우고 카드 파일도 교체 */
+          try{ btn.textContent='엑셀 확인 중… '+nm; const out=await nfStripCalcCol(await nfFileBytes(a.f));
+            if(out){ const up=await nfUploadAttachment(new File([out], nm, {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), r.id); if(up&&up.url){ a.f.prevUrl=a.f.url; a.f.url=up.url; a.f.size=up.size; cardChanged=true; } }
+            a.f.calcColChecked=1; }catch(e){ console.warn('[메일 산출식 정리]',e); } }
         let u=String(a.f&&a.f.url||''), size=attSize(a);
         if(a.file){ try{ const up=await nfUploadAttachment(a.file, r.id); if(up&&up.url){ upLinks.push(up); u=String(up.url); } }catch(e){ console.warn('[mail att upload]',e); } }
         if(u.indexOf('gdrive:')===0){ parts.push({name:nm, gdriveId:u.slice(7), apiKey:NF_GD_API_KEY, size}); total+=size; continue; }
         const buf=a.file?await a.file.arrayBuffer():await nfFileBytes(a.f); size=buf.byteLength;
         if(!a.file && size>1.5*MB){   /* 카드에 있는데 드라이브가 아닌 큰 파일 → 드라이브로 올리고 카드 링크도 드라이브로 바꿔 둠(📦 드라이브 이관과 같은 동작) */
           try{ btn.textContent='드라이브에 올리는 중… '+nm; const up=await nfUploadAttachment(new File([buf], nm, {type:nfMimeFromName(nm)}), r.id);
-            if(up&&String(up.url).indexOf('gdrive:')===0){ a.f.url=up.url; if(!a.f.size) a.f.size=size; cardChanged=true; parts.push({name:nm, gdriveId:String(up.url).slice(7), apiKey:NF_GD_API_KEY, size}); total+=size; continue; } }catch(e){ console.warn('[mail att gd]',e); } }
+            if(up&&String(up.url).indexOf('gdrive:')===0){ a.f.prevUrl=a.f.url; a.f.url=up.url; if(!a.f.size) a.f.size=size; cardChanged=true; parts.push({name:nm, gdriveId:String(up.url).slice(7), apiKey:NF_GD_API_KEY, size}); total+=size; continue; } }catch(e){ console.warn('[mail att gd]',e); } }
         inline+=size; total+=size; if(size>1.5*MB) big.push(nm+' '+fmtMB(size));
         parts.push({name:nm, b64:toB64(buf), size});
       }
-      if(cardChanged){ try{ await save(); }catch(_){} }
+      if(cardChanged){ try{   /* 팀 동기화로 카드가 새로 받아졌어도 지금 목록의 같은 파일 링크에 반영 */
+          const cur=reviews.find(x=>x.id===r.id);
+          if(cur && cur!==r) atts.forEach(a=>{ if(!a.f||!a.f.prevUrl) return; (cur.comments||[]).forEach(c=>(c.links||[]).forEach(l=>{ if(l && l.url===a.f.prevUrl){ l.prevUrl=l.url; l.url=a.f.url; l.size=a.f.size||l.size; if(a.f.calcColChecked) l.calcColChecked=1; } })); });
+          await save(); }catch(_){} }
       if(inline>3.2*MB) throw new Error('드라이브에 올리지 못한 첨부가 '+fmtMB(inline)+'라 한 번에 보낼 수 없어요 (약 3MB까지).\n큰 파일: '+(big.join(', ')||'-')+'\n→ 검토 대시보드 위쪽 📁 드라이브 연결(poursolution22 계정) 후 다시 보내 주세요.');
       /* 받는 쪽 메일 서버는 보통 20~25MB 넘는 메일을 거절 → 큰 파일은 다운로드 링크로 */
       const linkParts=[];
@@ -7758,6 +7767,43 @@ async function nfUpgradeEstimateXlsx(buf){
   const out=await wb.xlsx.writeBuffer();
   return {buf:out, added, kept, cover};
 }
+/* v8.6: 물량산출내역서 오른쪽 '산출식' 글자 칸만 지움 (v8.4로 만든 엑셀) — 다른 칸·숫자·수식·사진은 그대로 */
+async function nfStripCalcCol(buf){
+  const wb=new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const q=wb.getWorksheet('물량산출내역서'); if(!q) return null;
+  const v=c=>{ const x=c.value; return (x&&typeof x==='object'&&('result' in x))?x.result:x; };
+  let X=0; q.eachRow((row,r)=>row.eachCell((cell,c)=>{ if(!X && String(v(cell)||'').trim()==='산출식') X=c; }));
+  if(!X) return null;
+  /* 안전장치: 그 열에 산출식 글자·빈칸 말고 다른 값이 있으면 손대지 않음 */
+  let bad=false; for(let r=1;r<=q.rowCount;r++){ const c=q.getCell(r,X); if(c.isMerged && c.master!==c) continue; const x=v(c); if(x==null||x==='') continue;
+    if(typeof x==='string' && (x.trim()==='산출식' || /[×+÷]/.test(x))) continue; bad=true; break; }
+  if(bad) return null;
+  /* 병합(제목·소제목)이 이 열까지 걸쳐 있으면 한 칸 줄여서 다시 병합 */
+  const ms=Object.values(q._merges||{}).map(m=>m.model||m).filter(m=>m && m.right===X && m.left<X);
+  ms.forEach(m=>{ try{ q.unMergeCells(m.top,m.left,m.bottom,m.right); if(m.left<X-1 || m.top<m.bottom) q.mergeCells(m.top,m.left,m.bottom,X-1); }catch(e){ console.warn('[산출식 병합]',e); } });
+  for(let r=1;r<=q.rowCount;r++){ const c=q.getCell(r,X); const br=c.border&&c.border.right;
+    if(br){ const p=q.getCell(r,X-1); p.border=Object.assign({}, p.border||{}, {right:JSON.parse(JSON.stringify(br))}); }
+    c.value=null; c.style={}; }
+  try{ q.getColumn(X).width=9; }catch(_){}
+  return await wb.xlsx.writeBuffer();
+}
+async function nfStripAllCalcCols(){
+  if(typeof ExcelJS==='undefined'){ toast('엑셀 라이브러리 로딩 중 — 잠시 후 다시 눌러주세요'); return; }
+  const jobs=[]; (reviews||[]).forEach(r=>(r.comments||[]).forEach(c=>(c.links||[]).forEach(l=>{ if(l&&l.url&&/\.xlsx$/i.test(l.name||'')&&!l.calcColChecked) jobs.push({r,l}); })));
+  if(!jobs.length){ toast('확인할 엑셀이 없어요 ✓'); return; }
+  if(!confirm('검토방 엑셀 '+jobs.length+'개를 하나씩 열어서, 물량산출내역서 오른쪽 ‘산출식’ 글자 칸만 지웁니다.\n다른 칸·금액·수식·사진은 그대로예요. 끝날 때까지 창을 닫지 마세요.')) return;
+  let done=0, none=0, fail=0;
+  for(let i=0;i<jobs.length;i++){ const {r,l}=jobs[i]; toast('🧹 확인 중… '+(i+1)+'/'+jobs.length+' '+(r.site||''));
+    try{ const out=await nfStripCalcCol(await nfFileBytes(l));
+      if(!out){ l.calcColChecked=1; none++; continue; }
+      const up=await nfUploadAttachment(new File([out], l.name, {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), r.id);
+      const chk=await nfFileBytes(up); if(!chk||!chk.byteLength) throw new Error('verify 0 bytes');
+      l.prevUrl=l.url; l.url=up.url; l.size=up.size; l.calcColChecked=1; done++; await save();
+    }catch(e){ console.error('[산출식 지우기]', r.site, l.name, e); fail++; } }
+  try{ await save(); }catch(_){} render();
+  alert('산출식 칸 정리 완료\n· 지움: '+done+'개\n· 원래 없음: '+none+'개'+(fail?('\n· 실패: '+fail+'개 (다시 누르면 재시도)'):''));
+}
+window.nfStripAllCalcCols=nfStripAllCalcCols; window.nfStripCalcCol=nfStripCalcCol;
 async function nfUpgradeAllEstimates(){
   if(typeof ExcelJS==='undefined'){ toast('엑셀 라이브러리 로딩 중 — 잠시 후 다시 눌러주세요'); return; }
   const jobs=[];
