@@ -4745,6 +4745,7 @@ function renderFinalPreview(){
 function showView(v){
   document.querySelectorAll('.view').forEach(x=>x.style.display='none');
   var t=$('#view-'+v); if(t) t.style.display='block';
+  try{ var _w=document.querySelector('body > .wrap'); if(_w) _w.style.display=(t && !_w.contains(t))?'none':''; }catch(e){}   /* v8.7: 대시보드는 .wrap 밖 — 빈 .wrap 여백(116px) 숨김 */
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   if(v==='cross'){ window.__wf=4; try{ crossRender(); }catch(e){ console.error('crossRender',e); } }
   else if(v==='final'){ window.__wf=5; try{ renderFinalPreview(); }catch(e){ console.error('renderFinalPreview',e); } }
