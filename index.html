@@ -732,10 +732,7 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
   </button>
   <div class="tb-title" id="tbTitle">홈</div>
   <button class="tb-dash" onclick="showView('dash')" title="검토 대시보드로 이동">📋 검토 대시보드</button>
-  <div class="tb-search">
-    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input type="text" id="tbSearch" placeholder="현장·발행이력 통합검색" onkeydown="if(event.key==='Enter')topSearch(this.value)">
-  </div>
+  <!-- v8.7: 상단 통합검색 칸 제거 — 검색은 각 화면(대시보드·발행이력) 검색칸 하나만 -->
   <div class="tb-right">
     <span class="tb-date" id="tbDate"></span>
     <div class="tb-user">
