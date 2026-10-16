@@ -5591,9 +5591,7 @@ async function buildConsultingWorkbook(d){
       const P=num(isRoof&&AF.roofPerim!=null?AF.roofPerim:AF.perim)||0;
       const M=(w==='drain')?1:(num(isRoof?(AF.roofMult!=null?AF.roofMult:(AF.mult||1)):(AF.mult||1))||1);
       const dimOf=b=>isRoof?((b.roofDims&&b.roofDims[col.cid])||null):((b.dims&&b.dims[col.cid])||null);
-      rows.push({lab:'', isA:true, get:b=>{ const d=dimOf(b); if(d){ const x=exprCell(d.A); return x.v?x:null; } const v=col.get(b); return v?{f:null,v}:null; }});
-      if(P && EBq.some(b=>{ const d=dimOf(b); return d && evalExpr(d.L); })) rows.push({lab:'', isP:true, get:b=>{ const d=dimOf(b); if(!d) return null; const L=evalExpr(d.L); return L?{f:_numStr(L)+'*'+_numStr(P), v:L*P}:null; }});
-      if(M!==1 && EBq.some(b=>{ const d=dimOf(b); return d && evalExpr(d.A); })) rows.push({lab:'', mult:M, dimOf, P});
+      rows.push({lab:'', get:b=>{ const v=num(col.get(b)); if(!v) return null; const rf=areaFormula(b,col.cid,isRoof); return {f:rf.f, v}; }});   /* v8.8: 한 줄 수식 — (면적+(둘레×계수))×1.05 */
       if(col.dormerCid && EBq.some(b=>dV(col,b)>0)) rows.push({lab:'뻐꾸기창', get:b=>{ const dm=(b.dormers&&b.dormers[col.dormerCid])||{}; const t=[]; if(num(dm.small)) t.push('3*'+num(dm.small)); if(num(dm.big)) t.push('4*'+num(dm.big)); const v=dV(col,b); return v?{f:'('+t.join('+')+')', v}:null; }});
     } else {
       rows.push({lab:'', get:b=>{ const x=col.fx(b); return num(x.v)?{f:x.f, v:num(x.v)}:null; }});   /* ㎡당 단가 항목·벽체도포 */
@@ -5603,8 +5601,8 @@ async function buildConsultingWorkbook(d){
     qsheet.mergeCells(RR,RC0,RR,LASTCOL); const h=qsheet.getCell(RR,RC0); h.value='산 출 근 거'; h.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,LASTCOL,'FFCFE9E3'); qsheet.getRow(RR).height=22; RR++;
     const nm=(col.kind==='base' && !col.unit && col.cid && roofCidSet.has(col.cid)) ? (roofCidSet.size>1?(col.label+' 옥상'):'옥상') : col.label;
     const hc=qsheet.getCell(RR,RC0); hc.value=nm; hc.font={name:FONT,bold:true,size:10}; hc.alignment={horizontal:'left',vertical:'middle',indent:1};
-    EBq.forEach((b,bi)=>{ const cc=qsheet.getCell(RR,RC0+1+bi); cc.value=b.name; cc.font={name:FONT,bold:true,size:10}; cc.alignment={horizontal:'center',vertical:'middle'}; });
-    fillRow(RR,RC0,LASTCOL); qsheet.getRow(RR).height=19; RR++;
+    EBq.forEach((b,bi)=>{ const cc=qsheet.getCell(RR,RC0+1+bi); cc.value=b.name; cc.font={name:FONT,size:11}; cc.alignment={horizontal:'center',vertical:'middle'}; });   /* 동 이름 칸은 왼쪽 표처럼 흰색(같은 동만 파스텔) */
+    fillRow(RR,RC0,RC0); qsheet.getRow(RR).height=19; RR++;
     const rTop=RR; let aRow=0, pRow=0;
     rows.forEach(rw=>{
       const lc=qsheet.getCell(RR,RC0); lc.value=rw.lab||null; lc.font={name:FONT,size:10}; lc.alignment={horizontal:'left',vertical:'middle',indent:1};
@@ -5623,7 +5621,7 @@ async function buildConsultingWorkbook(d){
     EBq.forEach((b,bi)=>{ const L=colLetter(RC0+1+bi); let v=0; for(let r=rTop;r<=rBot;r++){ const x=cellNum(qsheet.getCell(r,RC0+1+bi)); if(x) v+=x; } gsum+=v;
       const cell=qsheet.getCell(RR,RC0+1+bi); qNum(cell,{f:'SUM('+L+rTop+':'+L+rBot+')', v}); cell.font={name:FONT,bold:true,size:10};
       if(v>0) rgAddr[ci+'_'+bi]=cell.address; });
-    for(let cc=RC0;cc<=LASTCOL;cc++) qsheet.getCell(RR,cc).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}};
+    fillRow(RR,RC0,LASTCOL);   /* 합계 줄 = 왼쪽 '전체' 줄과 같은 색 */
     qsheet.getRow(RR).height=19; const sumRow=RR; RR++;
     frame(qsheet,top,RC0,sumRow,LASTCOL);
     /* 총 합산 물량 */
