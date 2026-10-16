@@ -5170,7 +5170,7 @@ function koNum(n){
   }
   return res;
 }
-const NF_XL_VER='POUR내역서 v8.8b (같은 동 색·갑지 바탕정리)';
+const NF_XL_VER='POUR내역서 v8.8c (소계 단가합 정리)';
 /* v8.4: 산출근거 '산출식' 글자 — 엑셀 수식을 사람이 읽기 쉽게: ((463.92+(341.28*0.1))*1.05) → (463.92 + 341.28×0.1) × 1.05 */
 function nfPrettyF(f){
   let x=String(f||'').replace(/^=/,'').replace(/\s+/g,'');
@@ -5468,7 +5468,7 @@ async function buildConsultingWorkbook(d){
     const itBot=dr-1;
     subRow(det,dr,'소      계',w.mat,w.lab,w.exp,w.sum);
     if(itBot>=itTop) [[6,w.mat],[8,w.lab],[10,w.exp],[12,w.sum]].forEach(a=>setF(det,dr,a[0],'SUM('+L_[a[0]]+itTop+':'+L_[a[0]]+itBot+')',a[1]));
-    if(itBot>=itTop) [5,7,9,11].forEach(c=>{ let sm=0; for(let rr=itTop;rr<=itBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+itTop+':'+L_[c]+itBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) */
+    if(itBot>=itTop) [11].forEach(c=>{   /* v8.8: 소계 행 재료비·노무비·경비 '단가' 합계는 안 넣음 (합계 단가만) */ let sm=0; for(let rr=itTop;rr<=itBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+itTop+':'+L_[c]+itBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) */
     detSub[w.key]=dr; detSubCells.push(dr); dr++;
   });
   /* ★ 벽체도포 — 방수공법 아래 별도 공종으로 (재/노/경 나눠서, 일위대가표와 동일) */
@@ -5488,7 +5488,7 @@ async function buildConsultingWorkbook(d){
     const itBot=dr-1;
     subRow(det,dr,'소      계',w.mat,w.lab,w.exp,w.sum);
     if(itBot>=itTop) [[6,w.mat],[8,w.lab],[10,w.exp],[12,w.sum]].forEach(a=>setF(det,dr,a[0],'SUM('+L_[a[0]]+itTop+':'+L_[a[0]]+itBot+')',a[1]));
-    if(itBot>=itTop) [5,7,9,11].forEach(c=>{ let sm=0; for(let rr=itTop;rr<=itBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+itTop+':'+L_[c]+itBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) */
+    if(itBot>=itTop) [11].forEach(c=>{   /* v8.8: 소계 행 재료비·노무비·경비 '단가' 합계는 안 넣음 (합계 단가만) */ let sm=0; for(let rr=itTop;rr<=itBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+itTop+':'+L_[c]+itBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) */
     detSub['wall']=dr; detSubCells.push(dr); dr++;
   }
   const etcItems=[].concat(
@@ -5511,7 +5511,7 @@ async function buildConsultingWorkbook(d){
     const eBot=dr-1;
     subRow(det,dr,'소      계',null,null,etcExp,etcExp);
     if(eBot>=eTop) [[10,etcExp],[12,etcExp]].forEach(a=>setF(det,dr,a[0],'SUM('+L_[a[0]]+eTop+':'+L_[a[0]]+eBot+')',a[1]));
-    if(eBot>=eTop) [9,11].forEach(c=>{ let sm=0; for(let rr=eTop;rr<=eBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+eTop+':'+L_[c]+eBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.3: 기타공사 소계도 단가 합계(경비·합계) */
+    if(eBot>=eTop) [11].forEach(c=>{   /* v8.8: 경비 단가 합계(I) 안 넣음 */ let sm=0; for(let rr=eTop;rr<=eBot;rr++){ const v=cellNum(det.getCell(rr,c)); if(v!=null) sm+=v; } const cl=det.getCell(dr,c); cl.value={formula:'SUM('+L_[c]+eTop+':'+L_[c]+eBot+')', result:sm}; cl.numFmt=FMT; cl.alignment={horizontal:'right',vertical:'middle'}; });   /* v8.3: 기타공사 소계도 단가 합계(경비·합계) */
     detEtcSub=dr; detSubCells.push(dr); dr++;
   }
   subRow(det,dr,'합      계',d.matTotal,d.labTotal,d.expTotal,d.directSum);
@@ -5570,7 +5570,8 @@ async function buildConsultingWorkbook(d){
   const RC0=LC+2, LASTCOL=RC0+nD;
   qsheet.getColumn(1).width=16; for(let i=0;i<nC;i++) qsheet.getColumn(i+2).width=16;
   qsheet.getColumn(LC+1).width=2.6; qsheet.getColumn(RC0).width=14; for(let i=1;i<=nD;i++) qsheet.getColumn(RC0+i).width=11;
-  const fillRow=(r,c1,c2,argb)=>{ for(let c=c1;c<=c2;c++) qsheet.getCell(r,c).fill={type:'pattern',pattern:'solid',fgColor:{argb:argb||LIGHT}}; };
+  const QLIGHT='FFF5F5F5';   /* v8.8: 물량산출내역서 머리줄·합계 줄은 더 연하게 */
+  const fillRow=(r,c1,c2,argb)=>{ for(let c=c1;c<=c2;c++) qsheet.getCell(r,c).fill={type:'pattern',pattern:'solid',fgColor:{argb:argb||QLIGHT}}; };
   qsheet.mergeCells(1,1,1,LASTCOL); const qt=qsheet.getCell(1,1); qt.value='물 량 산 출 내 역 서'; qt.font={name:FONT,bold:true,size:20}; qt.alignment={horizontal:'center',vertical:'middle'}; qsheet.getRow(1).height=34;
   qsheet.getCell('A2').value='단지명 :'; qsheet.getCell('A2').font={name:FONT,bold:true,size:11}; qsheet.getCell('B2').value=clientName; qsheet.getCell('B2').font={name:FONT,size:11}; qsheet.getRow(2).height=20;
   const topRow=4; let R=topRow;
@@ -5598,7 +5599,7 @@ async function buildConsultingWorkbook(d){
     }
     if(col.aqCid && c) (c.addq||[]).forEach(it=>{ if(!EBq.some(b=>addQVal(b,it.id)>0)) return; rows.push({lab:(String(it.name||'').trim()||'추가 물량'), get:b=>{ const x=exprCell(b.addq&&b.addq[it.id]); return x.v>0?x:null; }}); });
     const top=RR;
-    qsheet.mergeCells(RR,RC0,RR,LASTCOL); const h=qsheet.getCell(RR,RC0); h.value='산 출 근 거'; h.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,LASTCOL,'FFCFE9E3'); qsheet.getRow(RR).height=22; RR++;
+    qsheet.mergeCells(RR,RC0,RR,LASTCOL); const h=qsheet.getCell(RR,RC0); h.value='산 출 근 거'; h.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,LASTCOL,'FFFFFFFF'); qsheet.getRow(RR).height=22; RR++;
     const nm=(col.kind==='base' && !col.unit && col.cid && roofCidSet.has(col.cid)) ? (roofCidSet.size>1?(col.label+' 옥상'):'옥상') : col.label;
     const hc=qsheet.getCell(RR,RC0); hc.value=nm; hc.font={name:FONT,bold:true,size:10}; hc.alignment={horizontal:'left',vertical:'middle',indent:1};
     EBq.forEach((b,bi)=>{ const cc=qsheet.getCell(RR,RC0+1+bi); cc.value=b.name; cc.font={name:FONT,size:11}; cc.alignment={horizontal:'center',vertical:'middle'}; });   /* 동 이름 칸은 왼쪽 표처럼 흰색(같은 동만 파스텔) */
@@ -5632,7 +5633,7 @@ async function buildConsultingWorkbook(d){
   /* ── 왼쪽 표: 기본 물량(동 = 행, 공법 = 열) · 할증 후 물량 — 기본 칸 = 오른쪽 산출근거 '합계' 칸 참조 ── */
   function qtyTable(title, headerFn, kind){
     const secTop=R;
-    qsheet.mergeCells(R,1,R,LC); const sb=qsheet.getCell(R,1); sb.value=title; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'left',vertical:'middle',indent:1}; fillRow(R,1,LC,'FFCFE9E3'); qsheet.getRow(R).height=22; R++;
+    qsheet.mergeCells(R,1,R,LC); const sb=qsheet.getCell(R,1); sb.value=title; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'left',vertical:'middle',indent:1}; fillRow(R,1,LC,'FFFFFFFF'); qsheet.getRow(R).height=22; R++;
     const top=secTop;
     qsheet.getCell(R,1).value='동'; qCols.forEach((col,i)=>qsheet.getCell(R,i+2).value=headerFn(col));
     for(let c=1;c<=LC;c++){ const cell=qsheet.getCell(R,c); cell.alignment={horizontal:'center',vertical:'middle'}; cell.font={name:FONT,bold:true,size:11}; } fillRow(R,1,LC); qsheet.getRow(R).height=21; R++;
@@ -7943,7 +7944,8 @@ async function nfUpgradeEstimateXlsx(buf){
       });
       /* v8.0: 소계 행 ㎡당 단가 합계 (재·노·경·합계) — 빈 칸일 때만 */
       if(sec.rows.length){ const top=sec.rows[0], bot=sec.rows[sec.rows.length-1], sr=bot+1;
-        if(lab(det,sr)==='소계') [5,7,9,11].forEach(c=>{ const cl=det.getCell(sr,c); if(cl.value!=null && cl.value!=='') return; if(!ls && !sec.rows.some(rr=>num(det,rr,c)!=null)) return; let sm=0; for(let rr=top;rr<=bot;rr++){ sm+=(num(det,rr,c)||0); } cl.value={formula:'SUM('+L[c]+top+':'+L[c]+bot+')', result:sm}; cl.numFmt='#,##0'; cl.alignment={horizontal:'right',vertical:'middle'}; cl.font=Object.assign({},det.getCell(sr,12).font||{}); added++; }); }
+        if(lab(det,sr)==='소계') [5,7,9].forEach(c=>{ const cl=det.getCell(sr,c); if(isF(cl) && /^SUM\(/i.test(String(cl.value.formula))){ cl.value=null; added++; } });   /* v8.8: 소계 행 재·노·경 단가 합계 지움 */
+        if(lab(det,sr)==='소계') [11].forEach(c=>{ const cl=det.getCell(sr,c); if(cl.value!=null && cl.value!=='') return; if(!ls && !sec.rows.some(rr=>num(det,rr,c)!=null)) return; let sm=0; for(let rr=top;rr<=bot;rr++){ sm+=(num(det,rr,c)||0); } cl.value={formula:'SUM('+L[c]+top+':'+L[c]+bot+')', result:sm}; cl.numFmt='#,##0'; cl.alignment={horizontal:'right',vertical:'middle'}; cl.font=Object.assign({},det.getCell(sr,12).font||{}); added++; }); }
     });
     /* (3) 물량산출 — 숫자만 있던 기본물량 칸 → 오른쪽 산출근거 칸 참조 / (4) 산출내역서 공종 수량 → 할증 후 '전체' 참조 */
     if(q && !qNew){
