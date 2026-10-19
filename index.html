@@ -5171,7 +5171,7 @@ function koNum(n){
   }
   return res;
 }
-const NF_XL_VER='POUR내역서 v8.8d (테두리 통일)';
+const NF_XL_VER='POUR내역서 v8.8e (할증 % 칸 수식)';
 /* v8.4: 산출근거 '산출식' 글자 — 엑셀 수식을 사람이 읽기 쉽게: ((463.92+(341.28*0.1))*1.05) → (463.92 + 341.28×0.1) × 1.05 */
 function nfPrettyF(f){
   let x=String(f||'').replace(/^=/,'').replace(/\s+/g,'');
@@ -5645,14 +5645,18 @@ async function buildConsultingWorkbook(d){
     const secTop=R;
     qsheet.mergeCells(R,1,R,LC); const sb=qsheet.getCell(R,1); sb.value=title; sb.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; sb.alignment={horizontal:'left',vertical:'middle',indent:1}; fillRow(R,1,LC,'FFFFFFFF'); qsheet.getRow(R).height=22; R++;
     const top=secTop;
-    qsheet.getCell(R,1).value='동'; qCols.forEach((col,i)=>qsheet.getCell(R,i+2).value=headerFn(col));
+    const pctAddr={};
+    qsheet.getCell(R,1).value='동'; qCols.forEach((col,i)=>{ const hc=qsheet.getCell(R,i+2);
+      if(kind==='sur'){ /* v8.8d: 할증 %를 숫자 칸으로 — '싱글 (15%)'처럼 보이지만 값은 15. 이 숫자만 바꾸면 아래 할증 물량이 다 바뀜 */
+        hc.value=Math.round(num(col.sur)*1e6)/1e6; hc.numFmt='"'+String(col.label).replace(/"/g,'')+' ("General"%)"'; pctAddr[i]='$'+colLetter(i+2)+'$'+R; }
+      else hc.value=headerFn(col); });
     for(let c=1;c<=LC;c++){ const cell=qsheet.getCell(R,c); cell.alignment={horizontal:'center',vertical:'middle'}; cell.font={name:FONT,bold:true,size:11}; } fillRow(R,1,LC); qsheet.getRow(R).height=21; R++;
     const dataTop=R;
     EBq.forEach((b,bi)=>{
       qsheet.getCell(R,1).value=b.name; qsheet.getCell(R,1).alignment={horizontal:"center",vertical:"middle"}; qsheet.getCell(R,1).font={name:FONT,size:11};
       qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); const bv=baseV(col,b);
         if(kind==='base'){ const ra=rgAddr[i+'_'+bi]; cell.value = ra ? {formula:ra, result:bv} : bv; baseAddr[bi+'_'+i]=cell.address; }
-        else { const ba=baseAddr[bi+'_'+i], sv=bv*(1+col.sur/100); cell.value = ba ? {formula: ba+'*(1+'+_numStr(col.sur)+'/100)', result:sv} : sv; }
+        else { const ba=baseAddr[bi+'_'+i], sv=bv*(1+col.sur/100); cell.value = ba ? {formula: ba+'*(1+'+(pctAddr[i]||_numStr(col.sur))+'/100)', result:sv} : sv; }
         cell.numFmt=FMT_Q2; cell.alignment={horizontal:'right',vertical:'middle'}; cell.font={name:FONT,size:11};
       });
       qsheet.getRow(R).height=20; R++;
@@ -8007,7 +8011,7 @@ async function nfUpgradeEstimateXlsx(buf){
         let bTotR=0; for(let r=baseHdr+1;r<=q.rowCount;r++){ if(String(val(q.getCell(r,1))||'').trim()==='전체'){ bTotR=r; break; } }
         if(totR){ colInfo.forEach(ci=>{ ci.tot=num(q,totR,ci.c); ci.addr="'물량산출내역서'!"+q.getColumn(ci.c).letter+totR;
             /* 예전 파일: '전체'가 단순 합계(올림 없음) → 앱(산출내역서)과 같은 ROUNDUP 방식 값을 후보로 계산 */
-            const h=String(val(q.getCell(surHdr,ci.c))||''); const m=h.match(/\(([\d.]+)\s*%\)/); ci.sur=m?+m[1]:0;
+            const hv=val(q.getCell(surHdr,ci.c)); const h=String(hv==null?'':hv); const m=(typeof hv==='number')?[0,hv]:h.match(/\(([\d.]+)\s*%\)/); ci.sur=m?+m[1]:0;
             const bt=bTotR?num(q,bTotR,ci.c):null; ci.bAddr=bTotR?(q.getColumn(ci.c).letter+bTotR):null; ci.sAddr=q.getColumn(ci.c).letter+totR;
             if(bt!=null){ ci.bRound=Math.ceil(Math.round(bt*10000)/10000); ci.sRound=Math.ceil(Math.round(ci.bRound*(1+ci.sur/100)*10000)/10000); } });
           const toRoundup=set=>{ set.forEach(ci=>{ if(ci.bAddr==null||ci.bRound==null) return; const bc=q.getCell(ci.bAddr), sc=q.getCell(ci.sAddr);
@@ -8126,6 +8130,17 @@ async function nfUpgradeEstimateXlsx(buf){
   /* v8.7 (3) 원가계산서 '일금 ○○ 원정' 글자가 총공사비와 다르면 맞춤 (엑셀에서 숫자만 고친 경우) */
   try{ const e3=cost&&cost.getCell('E3'), t=cost?val(cost.getCell('D28')):null; if(e3 && typeof t==='number' && t>0){ const cur=String(val(e3)||''); const want='일금  '+koNum(t)+'  원정 (₩'+won(t)+'원)';
       if(/^일금/.test(cur.trim()) && cur.replace(/\s/g,'')!==want.replace(/\s/g,'')){ e3.value=want; added++; } } }catch(e){ console.warn('[금액 글자]',e); }
+  /* v8.8d: 할증 후 물량 — 머리칸 '싱글 (15%)' 글자 → 숫자 15(보이는 건 그대로), 동별 할증 물량 수식이 그 칸을 참조 */
+  try{ const qs=wb.getWorksheet('물량산출내역서'); if(qs){
+      const hdrs=[]; for(let r=1;r<=Math.min(qs.rowCount,300);r++){ if(String(val(qs.getCell(r,1))||'').trim()==='동') hdrs.push(r); }
+      const sH=hdrs[1];
+      if(sH){ for(let c=2;c<40;c++){ const hc=qs.getCell(sH,c); const t=val(hc); if(t==null||t==='') break; if(typeof t!=='string') continue;
+          const m=t.match(/^\s*(.*?)\s*\(\s*([\d.]+)\s*%\s*\)\s*$/); if(!m) continue; const pct=+m[2], L=qs.getColumn(c).letter;
+          hc.style=Object.assign({},hc.style,{numFmt:'"'+m[1].replace(/"/g,'')+' ("General"%)"'}); hc.value=pct; added++;
+          const pa='$'+L+'$'+sH;
+          for(let r=sH+1;r<=qs.rowCount;r++){ const dn=String(val(qs.getCell(r,1))||'').trim(); if(!dn||dn==='전체'||dn==='총물량') break;
+            const cl=qs.getCell(r,c); if(!isF(cl)) continue; const f=String(cl.value.formula).replace(/\s/g,'');
+            const fm=f.match(/^(\$?[A-Z]+\$?\d+)\*\(1\+([\d.]+)\/100\)$/); if(fm && Math.abs(+fm[2]-pct)<1e-9){ cl.value={formula:fm[1]+'*(1+'+pa+'/100)', result:cl.value.result}; } } } } } }catch(e){ console.warn('[할증 % 칸]',e); }
   /* v8.8d: 테두리 통일 — 점선처럼 보이던 hair 선 → 가는 실선(thin), 갑지 '공사 범위' 줄 테두리 */
   try{ wb.eachSheet(ws=>{ ws.eachRow({includeEmpty:false},row=>row.eachCell({includeEmpty:true},cell=>{ const b=cell.border; if(!b) return; let ch=false; const nb={};
       ['top','left','bottom','right'].forEach(k=>{ const x=b[k]; if(x && x.style==='hair'){ nb[k]={style:'thin',color:x.color||{argb:'FF000000'}}; ch=true; } else if(x) nb[k]=x; });
