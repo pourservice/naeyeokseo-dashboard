@@ -1792,7 +1792,8 @@ function dongTokens(name){
   const parts=s.split(/[,，\/·]+/).map(x=>x.trim()).filter(Boolean);
   /* v7.9: 쪼갠 조각이 전부 '동 번호'(101 · 101동 · 101~103동)일 때만 여러 동으로 봄.
      '101동 1,2라인 옥상/1,2라인 옥탑' 같은 부분공사 이름은 쉼표·슬래시가 있어도 한 동(한 줄)으로 계산 */
-  const isDongPart=x=>/^([A-Za-z]|\d+|[A-Za-z]\d+|\d+[A-Za-z])\s*동?$/.test(x) || /^\d+\s*[~\-]\s*\d+\s*동?$/.test(x);
+  const isFullDong=x=>/^\d+\s*동\s*(?=.*[^\d\s]).+$/.test(x);   /* v8.8d: '705동2호라인, 708동2호라인'처럼 조각마다 '번호+동+라인' → 동별로 나눔 */
+  const isDongPart=x=>/^([A-Za-z]|\d+|[A-Za-z]\d+|\d+[A-Za-z])\s*동?$/.test(x) || /^\d+\s*[~\-]\s*\d+\s*동?$/.test(x) || (parts.length>1 && parts.every(isFullDong));
   if(parts.length>1 && !parts.every(isDongPart)) return [s];
   if(parts.length===1 && !isDongPart(parts[0])) return [s];
   const out=[];
@@ -5570,6 +5571,14 @@ async function buildConsultingWorkbook(d){
   const RC0=LC+2, LASTCOL=RC0+nD;
   qsheet.getColumn(1).width=16; for(let i=0;i<nC;i++) qsheet.getColumn(i+2).width=16;
   qsheet.getColumn(LC+1).width=2.6; qsheet.getColumn(RC0).width=14; for(let i=1;i<=nD;i++) qsheet.getColumn(RC0+i).width=11;
+  /* v8.8d: 글자가 잘리지 않게 칸 너비를 이름 길이에 맞춤 (한글 2칸, 영문·숫자 1.1칸) */
+  { const tw=t=>{ let w=0; for(const ch of String(t||'')) w+=(/[\u0000-\u00ff]/.test(ch)?1.1:2.0); return w; };
+    const nmW=Math.max(0,...EBq.map(b=>tw(b.name)))+3;
+    qsheet.getColumn(1).width=Math.max(16,Math.min(60,nmW));
+    for(let i=1;i<=nD;i++) qsheet.getColumn(RC0+i).width=Math.max(11,Math.min(60,tw(EBq[i-1].name)+3));
+    const labs=['총 합산 물량']; qCols.forEach(col=>{ labs.push(col.label+' 옥상', col.label+' 옥탑'); const c=col.cid?categories.find(x=>x.id===col.cid):null; if(c&&Array.isArray(c.addq)) c.addq.forEach(it=>labs.push(String(it.name||'추가 물량'))); });
+    qsheet.getColumn(RC0).width=Math.max(14,Math.min(40,Math.max(...labs.map(tw))+3));
+    qCols.forEach((col,i)=>{ qsheet.getColumn(i+2).width=Math.max(16,Math.min(40,tw(col.label+' ('+Math.round(col.sur||0)+'%)')+4)); }); }
   const QLIGHT='FFF5F5F5';   /* v8.8: 물량산출내역서 머리줄·합계 줄은 더 연하게 */
   const fillRow=(r,c1,c2,argb)=>{ for(let c=c1;c<=c2;c++) qsheet.getCell(r,c).fill={type:'pattern',pattern:'solid',fgColor:{argb:argb||QLIGHT}}; };
   qsheet.mergeCells(1,1,1,LASTCOL); const qt=qsheet.getCell(1,1); qt.value='물 량 산 출 내 역 서'; qt.font={name:FONT,bold:true,size:20}; qt.alignment={horizontal:'center',vertical:'middle'}; qsheet.getRow(1).height=34;
@@ -7588,7 +7597,7 @@ function __renderDetailInner(){
       const n=(r.notes||'').trim();
       const lines=n?n.split(/\n+/).map(x=>x.replace(/^[-•*·]\s*/,'').trim()).filter(Boolean):[];
       const body = detailNotesEdit
-        ? `<textarea id="d_notes" class="d-notes-ta" placeholder="특이사항을 한 줄에 하나씩 적어주세요 (예: 옥탑 좁음 → 작업성 고려)>${esc(n)}</textarea><div class="d-notes-btns"><button class="mini-btn primary" id="dNotesSave">저장</button><button class="mini-btn" id="dNotesCancel">취소</button></div>`
+        ? `<textarea id="d_notes" class="d-notes-ta" placeholder="특이사항을 한 줄에 하나씩 적어주세요 (예: 옥탑 좁음 → 작업성 고려)">${esc(n)}</textarea><div class="d-notes-btns"><button class="mini-btn primary" id="dNotesSave">저장</button><button class="mini-btn" id="dNotesCancel">취소</button></div>`
         : (lines.length ? `<ul>${lines.map((l,li)=>`<li>${nfMarkHtml(l,null,r.marks)}<button class="nf-mk" data-mk="${li}" title="글자 색 바꾸기">🎨</button></li>`).join('')}</ul><div style="font-size:11px;color:#98A2B3;margin-top:4px;">줄 옆 🎨를 누르면 글자 색을 고를 수 있어요 (댓글도 같아요)</div>` : `<div class="sb-empty">특이사항이 없습니다 — 오른쪽 ‘수정’으로 추가하세요.</div>`);
       return `<div class="spec-box detail"><div class="sb-h">특이사항${detailNotesEdit?'':`<button class="sb-edit" id="dNotesEdit">✏ 수정</button>`}</div>${body}</div>`;
     })()}
