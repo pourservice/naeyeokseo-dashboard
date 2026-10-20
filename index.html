@@ -5192,7 +5192,10 @@ async function buildConsultingWorkbook(d){
   const now=new Date(), dateStr=now.getFullYear()+'. '+(now.getMonth()+1)+'. '+now.getDate()+'.';
   /* v7.8: 물량이 있거나(qty>0) STEP5에서 '사용' 체크한 공법은 일위대가표·산출내역서·집계표에 표시
      (원본 템플릿처럼, 물량 입력 전에도 선택 공법의 일위대가 단가분석이 나오도록) */
-  const used=d.works.filter(w=>w.qty>0 || (typeof activeWorks!=='undefined' && activeWorks.includes(w.key)));
+  const used=(()=>{ const u0=d.works.filter(w=>w.qty>0 || (typeof activeWorks!=='undefined' && activeWorks.includes(w.key)));
+    /* v8.8f: 공종 순서 — 싱글·금속기와가 항상 1번(먼저), 나머지(배수로·슬라브·PVC 등)는 그 뒤 원래 순서. 번호도 1, 2, 3…으로 다시 매김 */
+    const pri=k=>(k==='shingle'?0:(k==='metal'?1:2));
+    return u0.map((w,i)=>({w,i})).sort((A,B)=>(pri(A.w.key)-pri(B.w.key))||(A.i-B.i)).map((o,n)=>Object.assign({},o.w,{name:(n+1)+'. '+String(o.w.name||'').replace(/^\s*[0-9]+(-[0-9]+)?\.\s*/,'')})); })();
   const FONT='맑은 고딕', FMT='#,##0', FMT2='#,##0.#####', LIGHT='FFF2EEE4';
   const FMT_Q2='#,##0.00', FMT_Q3='#,##0.000';   /* 물량 표시용 고정 소수 — 기본/할증후 2자리, 산출근거 3자리 */
   const L_={4:'D',5:'E',6:'F',7:'G',8:'H',9:'I',10:'J',11:'K',12:'L',13:'M'};   /* 열 번호→문자 (수식 주소용) */
@@ -7688,7 +7691,12 @@ function __renderDetailInner(){
     const fs=await pickFiles(true); if(!fs.length) return; const t=keepText(); c.links=c.links||[];
     for(const f of fs){ try{ c.links.push(await upOne(f)); }catch(e){ alert('‘'+f.name+'’ 첨부 실패: '+(e&&e.message||e)); } }
     await afterFile(c,t); toast('✓ 파일 '+fs.length+'개를 붙였어요'); });
-  $('#detailModal').querySelectorAll('[data-editsave]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.editsave; const ta=$('#cEditTa_'+id); if(!ta) return; const nv=(ta.value||'').trim(); const c=(r.comments||[]).find(x=>String(x.id)===String(id)); if(c){ try{ if(Array.isArray(c.marks)&&c.marks.length){ const ol=String(c.text||'').split(/\n/).map(nfMarkKey), nl=nv.split(/\n/).map(nfMarkKey); c.marks=c.marks.map(m=>{ if(!m||nl.indexOf(m.t)>=0) return m; const i=ol.indexOf(m.t); return (i>=0&&nl[i])?{t:nl[i],c:m.c}:null; }).filter(Boolean); } }catch(_){}   /* v8.8f: 글을 고쳐도 그 줄 색 유지 */ c.text=nv; c.edited=new Date().toISOString(); } editingCmtId=null; await save(); renderDetail(); render(); toast('댓글을 수정했어요.'); });
+  $('#detailModal').querySelectorAll('[data-editsave]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.editsave; const ta=$('#cEditTa_'+id); if(!ta) return; const nv=(ta.value||'').trim(); const c=(r.comments||[]).find(x=>String(x.id)===String(id)); const __oldTxt=c?String(c.text||''):''; if(c){ try{ if(Array.isArray(c.marks)&&c.marks.length){ const ol=String(c.text||'').split(/\n/).map(nfMarkKey), nl=nv.split(/\n/).map(nfMarkKey); c.marks=c.marks.map(m=>{ if(!m||nl.indexOf(m.t)>=0) return m; const i=ol.indexOf(m.t); return (i>=0&&nl[i])?{t:nl[i],c:m.c}:null; }).filter(Boolean); } }catch(_){}   /* v8.8f: 글을 고쳐도 그 줄 색 유지 */ c.text=nv; c.edited=new Date().toISOString(); } editingCmtId=null; await save(); renderDetail(); render(); toast('댓글을 수정했어요.');
+    /* v8.8f: 수정하면서 새로 넣은 @태그에도 알림 (원래 있던 태그는 다시 안 보냄) */
+    try{ const re=/(?<![A-Za-z0-9._%+\-])@([가-힣A-Za-z0-9_]+)/g; const oldT=new Set((String(__oldTxt||'').match(re)||[])); const newT=[...new Set((nv.match(re)||[]))].filter(t=>!oldT.has(t));
+      if(newT.length){ const who=(c&&c.author)||lastAuthor||''; nfMentionNotify(newT, r.site, nv, who);
+        if(nfHookUrl()) jandiNotify(newT.join(' ')+' 검토 요청 — '+(r.site||'(현장)'), {title:'📋 '+(r.site||'현장')+' 검토 요청', desc:((who?('작성자: '+who+'\n'):'')+nv).slice(0,300)});
+        toast('댓글 수정 + 잔디 알림 발송('+newT.join(', ')+')'); } }catch(_){} });
   wireChecks($('#detailModal'),r);
   const tagBtn=$('#cTag'), tagList=$('#tagList');
   if(tagBtn){ tagBtn.onclick=e=>{ e.stopPropagation();
