@@ -1214,8 +1214,10 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <div style="flex:1;min-width:240px;"><div style="font-weight:700;font-size:13.5px;color:#212A3E;">📋 현장설명회 자료 검토 <span id="hsProg" style="font-weight:400;font-size:12px;color:#475467;margin-left:6px;"></span></div>
             <div style="font-size:12px;color:#768194;margin-top:2px;">최종본 전에 현설 PDF·사진을 올리면, 지금 내역서(동·공종·공사범위)와 대조해서 <b>추가·누락 의심 / 의도 확인 / 필수 확인</b> 항목을 보여줘요.</div></div>
+          <label class="btn ghost" style="font-weight:700;cursor:pointer;" title="여기서 만들지 않은 내역서(따로 작업한 엑셀)를 기준으로 현설 자료와 대조할 때">📊 따로 만든 내역서 엑셀<input type="file" accept=".xlsx,.xlsm,.xls" style="display:none;" onchange="nfHsExtUpload(this)"></label>
           <label class="btn" style="background:#394867;color:#fff;border-color:#394867;font-weight:700;cursor:pointer;">📎 현설 자료 올리기<input type="file" accept=".pdf,image/*" multiple style="display:none;" onchange="nfHsUpload(this)"></label>
         </div>
+        <div id="hsExt" style="display:none;margin-top:8px;padding:7px 10px;border-radius:7px;background:#EFF8FF;border:1px solid #B2DDFF;font-size:12px;color:#175CD3;"></div>
         <div id="hsStatus" style="font-size:12px;color:#175CD3;margin-top:6px;min-height:14px;"></div>
         <div id="hsBody" style="margin-top:4px;"></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
@@ -8883,7 +8885,30 @@ window.pvRenderSheet=pvRenderSheet; window.pvOnEdit=pvOnEdit; window.pvBasicEdit
   function loadHS(){ try{ var all=JSON.parse(localStorage.getItem('nf_hsr')||'{}'); var k=siteKey(); var o=all[k]; if(o&&o.items){ HS={key:k,files:o.files||[],pages:(o.pages||[]).map(function(p){return {no:p.no,file:p.file,text:p.text,img:null,lines:[]};}),items:o.items,at:o.at||''}; return true; } }catch(e){} return false; }
 
   /* ---------- 지금 내역서 정보 ---------- */
+  /* v8.8f: 따로 만든 내역서 엑셀 기준 대조 — 올리면 그 엑셀 내용으로 대조 (내 내역서 화면은 그대로) */
+  var EXT=null;
+  function extSheetRows(wb){ var o={}; wb.SheetNames.forEach(function(sn){ try{ o[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }catch(e){ o[sn]=[]; } }); return o; }
+  function parseExtXlsx(buf,fname){
+    var wb=XLSX.read(new Uint8Array(buf),{type:'array'}); var S=extSheetRows(wb); var all=[], rowsAll=[];
+    Object.keys(S).forEach(function(sn){ S[sn].forEach(function(r){ rowsAll.push(r); r.forEach(function(v){ if(typeof v==='string'&&v.trim()) all.push(v.trim()); }); }); });
+    var rowText=function(r){ return r.map(function(v){return String(v==null?'':v).trim();}).filter(Boolean); };
+    var after=function(re){ for(var i=0;i<rowsAll.length;i++){ var cells=rowText(rowsAll[i]); for(var j=0;j<cells.length;j++){ var c=cells[j]; if(re.test(ns(c))){ var m=c.split(/[:：]/); var rest=m.length>1?m.slice(1).join(':').trim():''; if(rest) return rest; for(var k=j+1;k<cells.length;k++){ if(/[:：]|^▶/.test(cells[k])) break; if(cells[k]) return cells[k]; } } } } return ''; };
+    var numAfter=function(re){ for(var i=0;i<rowsAll.length;i++){ var r=rowsAll[i]; var hit=r.some(function(v){ return typeof v==='string' && re.test(ns(v)); }); if(!hit) continue; for(var k=0;k<r.length;k++){ var v=r[k]; if(typeof v==='number' && v>=10000) return v; } } return 0; };
+    var hd=findDongs([{no:1,lines:all.map(function(t){return {t:t};}),text:all.join('\n')}]);
+    var dongs={}; Object.keys(hd).forEach(function(n){ dongs[n]=n+'동'; });
+    var names=[]; var q=S['물량산출내역서']; if(q){ var h=-1; for(var i=0;i<q.length;i++){ if(String(q[i][0]).trim()==='동'){ h=i; break; } } if(h>=0) for(var i2=h+1;i2<q.length;i2++){ var dn=String(q[i2][0]||'').trim(); if(!dn||dn==='전체'||dn==='총물량') break; names.push(dn); } }
+    if(!names.length) names=Object.keys(dongs).map(function(n){return n+'동';});
+    var works=[]; var det=S['산출내역서']; if(det) det.forEach(function(r){ var a=String(r[0]||'').trim(); var m=a.match(/^\d+(-\d+)?\.\s*(.+)$/); if(!m||/기타공사/.test(a)) return; var qv=Number(r[3])||0; if(qv>0) works.push({name:m[2],spec:String(r[1]||'').trim(),qty:qv,unit:0}); });
+    var site=after(/^▶?발주처/)||String(fname||'').replace(/\.[^.]+$/,'');
+    var scope=after(/^▶?공사범위/);
+    var total=numAfter(/총공사비/)||numAfter(/공사금액/);
+    var hay=all.join(' ');
+    return {dongs:dongs,names:names,works:works,extras:[],notices:[],hay:hay,hayNs:hay.replace(/\s+/g,''),scope:scope,total:total,site:site,file:fname};
+  }
+  function extShow(){ var b=$('hsExt'); if(!b) return; if(!EXT){ b.style.display='none'; b.innerHTML=''; return; } b.style.display='';
+    b.innerHTML='📊 <b>대조 기준: 따로 만든 내역서</b> — '+esc(EXT.file)+' · '+esc(EXT.site)+' (동 '+EXT.names.length+'개'+(EXT.works.length?(' · 공종 '+EXT.works.length+'개'):'')+(EXT.total?(' · '+Number(EXT.total).toLocaleString('ko-KR')+'원'):'')+') <a href="javascript:void(0)" onclick="nfHsExtClear()" style="margin-left:6px;color:#98A2B3;">✕ 내 내역서 기준으로 되돌리기</a>'; }
   function estInfo(){
+    if(EXT) return EXT;
     var bl=[]; try{ bl=(typeof buildings!=='undefined'?buildings:[]); }catch(e){}
     var cats=[]; try{ cats=(typeof categories!=='undefined'?categories:[]); }catch(e){}
     var ex=[]; try{ ex=(typeof extras!=='undefined'?extras:[]); }catch(e){}
@@ -9078,26 +9103,34 @@ window.pvRenderSheet=pvRenderSheet; window.pvOnEdit=pvOnEdit; window.pvBasicEdit
     try{
       var pages=await readFiles(files,status);
       if(!pages.length){ status('PDF나 이미지 파일만 읽을 수 있어요.'); return; }
-      HS={key:siteKey(),files:files.map(function(f){return f.name;}),pages:pages,items:[],at:new Date().toLocaleString('ko-KR')};
+      HS={key:(EXT?('EXT:'+EXT.file):siteKey()),files:files.map(function(f){return f.name;}),pages:pages,items:[],at:new Date().toLocaleString('ko-KR')};
       HS.items=analyze(pages); saveHS(); render();
       var w=HS.items.filter(function(i){return i.kind==='warn';}).length, a=HS.items.filter(function(i){return i.kind==='ask';}).length;
       status('✔ '+pages.length+'쪽 읽기 완료 — ⚠️ '+w+'건 · ❓ '+a+'건. 아래 항목을 하나씩 확인해 주세요.');
     }catch(e){ console.error(e); status('⚠️ 읽기 실패: '+(e&&e.message||e)+' (인터넷 연결 확인)'); }
   };
+  window.nfHsExtUpload=async function(input){
+    var f=(input.files||[])[0]; input.value=''; if(!f) return; var st=$('hsStatus');
+    try{ EXT=parseExtXlsx(await f.arrayBuffer(), f.name); extShow();
+      if(HS.pages.length){ HS.key='EXT:'+EXT.file; HS.items=analyze(HS.pages); saveHS(); render(); if(st) st.textContent='📊 따로 만든 내역서 기준으로 다시 대조했어요.'; }
+      else if(st) st.textContent='📊 내역서 엑셀을 읽었어요 — 이제 📎 현설 자료를 올려 주세요.';
+    }catch(e){ console.error(e); EXT=null; extShow(); if(st) st.textContent='⚠️ 엑셀을 읽지 못했어요: '+(e&&e.message||e); }
+  };
+  window.nfHsExtClear=function(){ EXT=null; extShow(); var st=$('hsStatus'); if(HS.pages.length){ HS.key=siteKey(); HS.items=analyze(HS.pages); saveHS(); render(); if(st) st.textContent='↻ 내 내역서 기준으로 다시 대조했어요.'; } else if(st) st.textContent=''; };
   window.nfHsReanalyze=function(){ if(!HS.pages.length){ alert('먼저 현설 자료를 올려 주세요.'); return; } var keep={}; HS.items.forEach(function(i){ keep[i.kind+'|'+i.title]={s:i.status,n:i.note}; }); HS.items=analyze(HS.pages); HS.items.forEach(function(i){ var k=keep[i.kind+'|'+i.title]; if(k){ i.status=k.s; i.note=k.n||i.note; } }); saveHS(); render(); var st=$('hsStatus'); if(st) st.textContent='↻ 지금 내역서 기준으로 다시 대조했어요.'; };
   window.nfHsClear=function(){ if(!confirm('이 현장의 현설 검토 결과를 지울까요?')) return; try{ var all=JSON.parse(localStorage.getItem('nf_hsr')||'{}'); delete all[HS.key||siteKey()]; localStorage.setItem('nf_hsr',JSON.stringify(all)); }catch(e){} HS={key:siteKey(),files:[],pages:[],items:[],at:''}; render(); var st=$('hsStatus'); if(st) st.textContent=''; };
   window.nfHsMemo=function(){ if(!HS.items.length){ alert('먼저 현설 자료를 올려 주세요.'); return; } var pr=progress(); var t='현설 자료 검토 '+(pr.done>=pr.total?'완료':'진행중')+' ('+pr.done+'/'+pr.total+')'; var ta=$('reviewAddNotes'); if(ta){ var lines=ta.value.split(/\n/).filter(function(s){ return !/^현설 자료 검토/.test(s.trim()); }); var cur=lines.join('\n').replace(/\s+$/,''); ta.value=(cur?cur+'\n':'')+t; } };
   window.nfHsCopyPrompt=async function(){
     var E=estInfo(); var pr=HS.items.length?progress():null;
     var L=[]; L.push('[현설 교차검토 요청]');
-    L.push('현장: '+siteKey()+' / 구분: '+val('fnStage')+' / 총공사비(VAT별도): '+(E.total?Number(E.total).toLocaleString('ko-KR')+'원':'-'));
+    L.push('현장: '+(EXT?(EXT.site+' (따로 만든 내역서: '+EXT.file+')'):siteKey())+' / 구분: '+(EXT?'최종본':val('fnStage'))+' / 총공사비(VAT별도): '+(E.total?Number(E.total).toLocaleString('ko-KR')+'원':'-'));
     L.push('공사범위: '+(E.scope||'-'));
     L.push('내역서 동: '+(E.names.join(', ')||'-'));
-    E.works.forEach(function(w){ L.push('- 공종: '+w.name+(w.spec?(' ('+w.spec+')'):'')+' '+Math.round(w.qty).toLocaleString('ko-KR')+'㎡ · ㎡당 '+w.unit.toLocaleString('ko-KR')+'원'); });
+    E.works.forEach(function(w){ L.push('- 공종: '+w.name+(w.spec?(' ('+w.spec+')'):'')+' '+Math.round(w.qty).toLocaleString('ko-KR')+'㎡'+(w.unit?(' · ㎡당 '+w.unit.toLocaleString('ko-KR')+'원'):'')); });
     if(E.extras.length) L.push('기타공사: '+E.extras.join(' / '));
     if(E.notices.length) L.push('안내문구: '+E.notices.map(function(x){return '* '+x;}).join(' / '));
-    if(val('special')) L.push('특이사항: '+val('special'));
-    if(val('reviewAddNotes')) L.push('검토방 메모: '+val('reviewAddNotes').replace(/\n+/g,' / '));
+    if(!EXT && val('special')) L.push('특이사항: '+val('special'));
+    if(!EXT && val('reviewAddNotes')) L.push('검토방 메모: '+val('reviewAddNotes').replace(/\n+/g,' / '));
     if(pr){ L.push(''); L.push('[1차 검토 결과 '+pr.done+'/'+pr.total+']');
       HS.items.filter(function(i){return i.kind==='warn'||i.kind==='ask';}).forEach(function(i){ L.push((KIND[i.kind][0])+' '+i.title+(i.status?(' → '+({ok:'확인',notice:'안내문구 추가',memo:'메모 추가',skip:'해당 없음'}[i.status]||i.status)+(i.note?(': '+i.note):'')):' → 미확인')); }); }
     L.push(''); L.push('현설 자료(PDF/사진)를 같이 첨부했어. 내역서 엑셀과 대조해서 ⚠️추가 필요 / ❌제외 필요 / ❓확인 필요로 정리해 주고, 직영 등 의도적 제외는 구분해 줘. 빨간 글씨·손글씨도 꼭 봐 줘.');
