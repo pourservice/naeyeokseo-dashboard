@@ -5324,8 +5324,12 @@ async function buildConsultingWorkbook(d){
   cov.getRow(br2+1).height=10.5;
   const brW=br2+2; cov.mergeCells('B'+brW+':N'+(brW+1)); cv('B'+brW,'    ※ 본 내역서와 실제 공사 범위와 일치 하는지 반드시 검토하시기 바랍니다.',{size:14,bold:true}); cov.getRow(brW).height=13.5; cov.getRow(brW+1).height=13.5;
   const n1=brW+2; cov.mergeCells('B'+n1+':N'+n1); cv('B'+n1,'             - 내역서상 기재된 공사범위 외의 추가되는 공사에 대해서는 추가 비용 발생됨을 알려드립니다.',{size:10}); cov.getRow(n1).height=13.5;
-  const n2=n1+1; cov.mergeCells('B'+n2+':N'+n2); cv('B'+n2,"             - 상기 내역서는 '예상내역서'로 현장설명회 이후 최종본이 발생되며 최종본으로 컨설팅 내역 단가가 확정됨을 알려드립니다.",{size:10}); cov.getRow(n2).height=13.5;
-  const n3=n2+1; cov.mergeCells('B'+n3+':N'+n3); cv('B'+n3,'                - 본 공사실행 견적은 견적일 기준 10일간 유효합니다. 최근 원자재 공급 및 자재 단가 변동이 빈번하여 유효기간 내에도 주요 자재 가격 또는 현장 조건 변경 시 견적 금액이 조정될 수 있습니다. ',{size:8}); cov.getRow(n3).height=13.5;
+  /* v8.8f: 최종본이면 '예상내역서 … 현장설명회 이후 최종본' 문구 빼고, 유효기간 문구는 잘리지 않게 두 줄(글자 크기도 위 줄과 같게) */
+  let isFinalDoc=false; try{ isFinalDoc=((document.getElementById('fnStage')||{}).value==='최종본'); }catch(_){}
+  let nl=n1+1;
+  if(!isFinalDoc){ cov.mergeCells('B'+nl+':N'+nl); cv('B'+nl,"             - 상기 내역서는 '예상내역서'로 현장설명회 이후 최종본이 발생되며 최종본으로 컨설팅 내역 단가가 확정됨을 알려드립니다.",{size:10}); cov.getRow(nl).height=13.5; nl++; }
+  cov.mergeCells('B'+nl+':N'+nl); cv('B'+nl,'             - 본 공사실행 견적은 견적일 기준 10일간 유효합니다. 최근 원자재 공급 및 자재 단가 변동이 빈번하여',{size:10}); cov.getRow(nl).height=13.5; nl++;
+  cov.mergeCells('B'+nl+':N'+nl); cv('B'+nl,'                 유효기간 내에도 주요 자재 가격 또는 현장 조건 변경 시 견적 금액이 조정될 수 있습니다.',{size:10}); cov.getRow(nl).height=13.5;
 
   /* 2) 원가계산서 */
   const cost=wb.addWorksheet('원가계산서');
@@ -6181,7 +6185,7 @@ function nfMergeComments(a,b){
   const bestLink={};
   (a||[]).concat(b||[]).forEach(c=>{ if(!c||c.id==null) return; (c.links||[]).forEach(l=>{ if(!l||!l.name) return; const k=String(c.id)+'|'+l.name; const cur=bestLink[k]; if(!cur || rank(l.url)>rank(cur.url)) bestLink[k]={url:l.url,size:l.size}; }); });
   const map=new Map(); const noId=[];
-  const score=c=>(c&&c.edited)?String(c.edited):'';   /* 수정시각 — 있으면 최신 수정본이 이김(기기 간 수정 동기화) */
+  const score=c=>{ const e=(c&&c.edited)?String(c.edited):'', m=(c&&c.markedAt)?String(c.markedAt):''; return e>m?e:m; };   /* v8.8f: 글 수정·글자 색 중 더 최근 것 — 색만 바꿔도 다른 기기 옛 복사본에 안 밀림 */   /* 수정시각 — 있으면 최신 수정본이 이김(기기 간 수정 동기화) */
   const bad=c=>{ try{ return /�/.test(JSON.stringify(c||'')); }catch(_){ return false; } };   /* 글자 깨짐(U+FFFD) 포함 여부 */
   (a||[]).concat(b||[]).forEach(c=>{ if(!c) return; const id=c.id; if(id!=null && del.has(String(id))) return;   /* 삭제한 댓글은 되살리지 않음 */
     if(id==null){ noId.push(c); return; }
@@ -7346,7 +7350,7 @@ const NF_RESEND_TYPES=[
 const NF_COLORS=[['red','#C0262D','빨강'],['orange','#E8890C','주황'],['green','#12B76A','초록'],['blue','#2563EB','파랑'],['purple','#7A5AF8','보라']];
 function nfMarkKey(l){ return String(l||'').replace(/^\s*[-•·*]\s*/,'').trim(); }
 function nfColorOf(marks,l){ const k=nfMarkKey(l); const m=(Array.isArray(marks)?marks:[]).find(x=>x&&x.t===k); return m?m.c:''; }
-function nfSetColor(obj,l,c){ const k=nfMarkKey(l); let a=Array.isArray(obj.marks)?obj.marks.filter(x=>x&&x.t!==k):[]; if(c) a.push({t:k,c:c}); obj.marks=a; }
+function nfSetColor(obj,l,c){ const k=nfMarkKey(l); let a=Array.isArray(obj.marks)?obj.marks.filter(x=>x&&x.t!==k):[]; if(c) a.push({t:k,c:c}); obj.marks=a; obj.markedAt=new Date().toISOString(); }   /* v8.8f: 색 바꾼 시각 — 동기화 때 색 바꾼 쪽이 이기게 */
 function nfMarkHtml(l,fmt,marks){ const c=nfColorOf(marks,l); const h=(fmt||esc)(l); return c?'<span class="nf-c-'+c+'">'+h+'</span>':h; }
 function nfPalette(btn,cur,onPick){ let p=document.getElementById('nfPal'); if(p) p.remove(); p=document.createElement('div'); p.id='nfPal';
   p.innerHTML='<span class="lb">글자 색</span>'+NF_COLORS.map(x=>'<button title="'+x[2]+'" data-c="'+x[0]+'" class="'+(cur===x[0]?'on':'')+'" style="background:'+x[1]+'"></button>').join('')+'<button title="기본(색 없음)" data-c="" class="'+(!cur?'on':'')+'" style="background:#fff;color:#98A2B3;font-size:13px;">✕</button>';
@@ -7677,7 +7681,7 @@ function __renderDetailInner(){
     const fs=await pickFiles(true); if(!fs.length) return; const t=keepText(); c.links=c.links||[];
     for(const f of fs){ try{ c.links.push(await upOne(f)); }catch(e){ alert('‘'+f.name+'’ 첨부 실패: '+(e&&e.message||e)); } }
     await afterFile(c,t); toast('✓ 파일 '+fs.length+'개를 붙였어요'); });
-  $('#detailModal').querySelectorAll('[data-editsave]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.editsave; const ta=$('#cEditTa_'+id); if(!ta) return; const nv=(ta.value||'').trim(); const c=(r.comments||[]).find(x=>String(x.id)===String(id)); if(c){ c.text=nv; c.edited=new Date().toISOString(); } editingCmtId=null; await save(); renderDetail(); render(); toast('댓글을 수정했어요.'); });
+  $('#detailModal').querySelectorAll('[data-editsave]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.editsave; const ta=$('#cEditTa_'+id); if(!ta) return; const nv=(ta.value||'').trim(); const c=(r.comments||[]).find(x=>String(x.id)===String(id)); if(c){ try{ if(Array.isArray(c.marks)&&c.marks.length){ const ol=String(c.text||'').split(/\n/).map(nfMarkKey), nl=nv.split(/\n/).map(nfMarkKey); c.marks=c.marks.map(m=>{ if(!m||nl.indexOf(m.t)>=0) return m; const i=ol.indexOf(m.t); return (i>=0&&nl[i])?{t:nl[i],c:m.c}:null; }).filter(Boolean); } }catch(_){}   /* v8.8f: 글을 고쳐도 그 줄 색 유지 */ c.text=nv; c.edited=new Date().toISOString(); } editingCmtId=null; await save(); renderDetail(); render(); toast('댓글을 수정했어요.'); });
   wireChecks($('#detailModal'),r);
   const tagBtn=$('#cTag'), tagList=$('#tagList');
   if(tagBtn){ tagBtn.onclick=e=>{ e.stopPropagation();
@@ -8944,17 +8948,21 @@ window.pvRenderSheet=pvRenderSheet; window.pvOnEdit=pvOnEdit; window.pvBasicEdit
   }
 
   /* ---------- 대조 규칙 ---------- */
-  var FAC=[['관리동',['관리동','관리사무소동']],['경비실',['경비실']],['주민공동시설',['주민공동','커뮤니티','복리시설']],['어린이집',['어린이집']],['경로당',['경로당','노인정']],['캐노피',['캐노피','캐노비','케노피']],['옥탑·계단실',['옥탑','계단실']],['부대시설',['부대시설']],['지하주차장',['지하주차장','주차장상부']],['정자·파고라',['정자','파고라','퍼골라']],['상가',['상가']],['자전거보관소',['자전거']]];
-  var WORK=[['싱글',['싱글','쉥글','슁글','쉼글']],['배수로',['배수로','물홈통','홈통']],['우레탄',['우레탄']],['금속기와',['금속기와','기와']],['슬라브',['슬라브','평지붕','옥상바닥']],['도장',['도장']],['외벽',['외벽']],['후레싱',['후레싱','플래싱']],['난간·파라펫',['난간','파라펫','패러핏']],['드레인',['드레인','루프드레인']]];
+  var FAC=[['관리동',['관리동','관리사무소동']],['경비실',['경비실']],['주민공동시설',['주민공동','커뮤니티','복리시설']],['어린이집',['어린이집']],['경로당',['경로당','노인정']],['캐노피',['캐노피','캐노비','케노피']],['옥탑·계단실',['옥탑','계단실']],['부대시설',['부대시설']],['정자·파고라',['정자','파고라','퍼골라']],['상가',['상가']],['자전거보관소',['자전거']]];
+  var WORK=[['싱글',['싱글','쉥글','슁글','쉼글']],['배수로',['배수로','물홈통','홈통']],['우레탄',['우레탄']],['금속기와',['금속기와','기와']],['슬라브',['슬라브','평지붕','옥상바닥']],['후레싱',['후레싱','플래싱']],['난간·파라펫',['난간','파라펫','패러핏']],['드레인',['드레인','루프드레인']]];
   var SCOPE_RE=/(공사\s*범\s*위|공\s*사\s*개\s*요|기\s*타\s*사\s*항|특\s*기\s*사\s*항|특\s*이\s*사\s*항|공사\s*내\s*용|과\s*업\s*범\s*위)/;
   var STRONG_RE=/(제외|별도|미포함|협의|하자|보증|보수기간|동절기|겨울|봄철|실측|현장대리인|발주처\s*(제공|지급))/;
   var PHRASE_RE=/(제외|별도|미포함|포함|추가|상도만|상도|하도|철거|협의|기시공|기\s*시공|라인|지정|실측|전체)/;
   function exclAfter(hay,k){ var i=hay.indexOf(k); while(i>=0){ var seg=hay.slice(i+k.length, i+k.length+12).split(/[_,·\/()\[\]+|]/)[0]; if(/제외|미포함|별도|직영/.test(seg)) return true; i=hay.indexOf(k,i+1); } return false; }
   function ns(s){ return String(s||'').replace(/\s+/g,''); }
+  /* v8.8f: 옥상 공사만 검토 — 외벽·재도장·도장·지하주차장 줄은 읽지 않음 (같은 줄에 옥상·옥탑·싱글·배수로 등 옥상 말이 있으면 읽음) */
+  var NONROOF_RE=/(외벽|재도장|도장|지하주차장|지하\s*주차장|주차장)/, ROOF_RE=/(옥상|옥탑|지붕|싱글|슁글|쉥글|배수로|홈통|기와|슬라브|파라펫|패러핏|드레인|캐노피|후레싱|플래싱)/;
+  function nonRoof(t){ var x=ns(t); return NONROOF_RE.test(x) && !ROOF_RE.test(x); }
+  function roofText(p){ return p.lines.filter(function(l){ return !nonRoof(l.t); }).map(function(l){ return l.t; }).join('\n'); }
   function hasAny(t,arr){ return arr.some(function(k){ return t.indexOf(k)>=0; }); }
   function findDongs(pages){
     var out={};
-    pages.forEach(function(p){ p.lines.forEach(function(l,li){ var t=l.t; if(!/동/.test(t)) return;
+    pages.forEach(function(p){ p.lines.forEach(function(l,li){ var t=l.t; if(!/동/.test(t) || nonRoof(t)) return;
       var rr=/(\d{3,4})\s*[~∼\-]\s*(\d{3,4})\s*동/g, mr;
       while((mr=rr.exec(t))){ var a=+mr[1], z=+mr[2]; if(z>a&&z-a<60&&a>=101) for(var q=a;q<=z;q++){ if(!out[q]) out[q]={page:p.no,line:li,t:t}; } }
       var re=/(\d{3,4})(?=\s*([^\d]|$))/g, m;
@@ -8970,9 +8978,9 @@ window.pvRenderSheet=pvRenderSheet; window.pvOnEdit=pvOnEdit; window.pvBasicEdit
     var add=function(it){ var k=it.kind+'|'+it.title; if(seen[k]) return; seen[k]=1; it.id='h'+items.length; it.status=''; it.note=it.note||''; items.push(it); };
     var scopePages={}; pages.forEach(function(p){ if(SCOPE_RE.test(ns(p.text))) scopePages[p.no]=1; });
     var hasScope=Object.keys(scopePages).length>0;
-    var allNs=ns(pages.filter(function(p){ return !hasScope || scopePages[p.no]; }).map(function(p){return p.text;}).join('\n'));   /* 공사범위·기타사항 쪽만 (특기시방서 공법 설명은 제외) */
+    var allNs=ns(pages.filter(function(p){ return !hasScope || scopePages[p.no]; }).map(roofText).join('\n'));   /* 공사범위·기타사항 쪽만 (특기시방서 공법 설명은 제외) */
     var ordered=pages.filter(function(p){return scopePages[p.no];}).concat(pages.filter(function(p){return !scopePages[p.no];}));
-    var locate=function(words){ for(var i=0;i<ordered.length;i++){ var p=ordered[i]; for(var j=0;j<p.lines.length;j++){ var t=ns(p.lines[j].t); if(words.some(function(w){return t.indexOf(w)>=0;})) return {page:p.no,line:j,t:p.lines[j].t}; } } return null; };
+    var locate=function(words){ for(var i=0;i<ordered.length;i++){ var p=ordered[i]; for(var j=0;j<p.lines.length;j++){ if(nonRoof(p.lines[j].t)) continue; var t=ns(p.lines[j].t); if(words.some(function(w){return t.indexOf(w)>=0;})) return {page:p.no,line:j,t:p.lines[j].t}; } } return null; };
     /* 1) 동 대조 */
     var hd=findDongs(pages), ed=E.dongs;
     var hk=Object.keys(hd).map(Number).sort(function(a,b){return a-b;}), ek=Object.keys(ed).map(Number);
@@ -8992,7 +9000,7 @@ window.pvRenderSheet=pvRenderSheet; window.pvOnEdit=pvOnEdit; window.pvBasicEdit
       else if(excl) add({kind:'ask',cat:'공종',title:'"'+w[0]+'" — 현설엔 있음 · 내역서엔 "제외"',detail:'의도적 제외(직영 등) 맞나요? 이 공종 칸에 같이 묶인 동·부위(옥상·캐노피 등)도 함께 빠지는지 확인하세요.',page:loc&&loc.page,line:loc&&loc.line,quote:loc&&loc.t}); });
     /* 4) 범위·기타사항 문구 */
     var cnt=0;
-    pages.forEach(function(p){ p.lines.forEach(function(l,li){ var t=l.t, tn=ns(t); if(tn.length<6) return;
+    pages.forEach(function(p){ p.lines.forEach(function(l,li){ var t=l.t, tn=ns(t); if(tn.length<6 || nonRoof(t)) return;
       var strong=STRONG_RE.test(tn), phrase=PHRASE_RE.test(tn);
       var hs=/하자|보증|보수기간/.test(tn) && /\d+\s*(%|년|분의)/.test(tn); var y=tn.match(/(\d+)\s*년/);
       if(hs){ if(!/(보수기간|보증금)/.test(tn)) return; }   /* 계약 조건: 하자보수기간·보증금 %가 적힌 줄만 */
