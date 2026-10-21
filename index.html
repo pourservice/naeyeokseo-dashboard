@@ -5294,7 +5294,7 @@ async function buildConsultingWorkbook(d){
   if(scopeDongs.length){ const anyRoof=scopeDongs.some(b=>categories.some(c=>roofArea(b,c.id)>0)); const totalDong=num(gv('totalDong')); const N=scopeDongs.reduce((s,b)=>s+dongCount(b),0); const scopeTag=totalDong>0?(N>=totalDong?'(전체동)':'(일부동)'):''; scopeTxt=N+'개동'+scopeTag+' 옥상방수공사'+(anyRoof?'_옥탑포함':'_옥탑미포함')+facSuffix; }
   /* 공사범위 = 사용자가 직접 입력한 범위(공사명과 다르면 그 값) 우선, 없으면 자동 범위 */
   const scopeFinal=(projectName && autoName && projectName!==autoName) ? projectName : scopeTxt;
-  cov.mergeCells('B12:N12'); cv('B12','▶ 공사 범위 : '+scopeFinal,{size:10}); cov.getRow(12).height=21; mbox(cov,12,2,12,14);   /* v8.8d: 공사 범위도 테두리 */
+  cov.mergeCells('B12:N12'); cv('B12','▶ 공사 범위 : '+scopeFinal,{size:10}); cov.getRow(12).height=21; try{ const _tw=t=>{ let w=0; for(const ch of String(t||'')) w+=(/[\u0000-\u00ff]/.test(ch)?1.05:1.9); return w; }; const _ln=Math.max(1,Math.ceil(_tw('▶ 공사 범위 : '+scopeFinal)/96)); const c12=cov.getCell('B12'); c12.alignment=Object.assign({},c12.alignment||{},{wrapText:true,vertical:'middle'}); cov.getRow(12).height=Math.max(21,_ln*15+6); }catch(_){}   /* v8.8f: 긴 공사범위는 줄바꿈 */ mbox(cov,12,2,12,14);   /* v8.8d: 공사 범위도 테두리 */
   /* 실행가 설정 근거 박스 */
   cov.mergeCells('B13:N13'); cv('B13','실행가 설정 근거',{size:12,bold:true,al:'center'}); cov.getRow(13).height=18;
   let rw=14; const covUnitRow={};   /* v8.6: 공법별 실행가 칸 — 일위대가표 소계 합계단가(L)를 참조하도록 아래에서 연결 */
@@ -5333,15 +5333,15 @@ async function buildConsultingWorkbook(d){
   let isFinalDoc=false; try{ isFinalDoc=((document.getElementById('fnStage')||{}).value==='최종본'); }catch(_){}
   let nl=n1+1;
   if(!isFinalDoc){ cov.mergeCells('B'+nl+':N'+nl); cv('B'+nl,"             - 상기 내역서는 '예상내역서'로 현장설명회 이후 최종본이 발생되며 최종본으로 컨설팅 내역 단가가 확정됨을 알려드립니다.",{size:10}); cov.getRow(nl).height=13.5; nl++; }
-  cov.mergeCells('B'+nl+':N'+nl); cv('B'+nl,'             - 본 공사실행 견적은 견적일 기준 10일간 유효합니다. 최근 원자재 공급 및 자재 단가 변동이 빈번하여',{size:10}); cov.getRow(nl).height=13.5; nl++;
-  cov.mergeCells('B'+nl+':N'+nl); cv('B'+nl,'                 유효기간 내에도 주요 자재 가격 또는 현장 조건 변경 시 견적 금액이 조정될 수 있습니다.',{size:10}); cov.getRow(nl).height=13.5;
+  cov.mergeCells('B'+nl+':N'+nl); cv('B'+nl,'             - 본 공사실행 견적은 견적일 기준 10일간 유효합니다.',{size:10}); cov.getRow(nl).height=13.5; nl++;
+  cov.mergeCells('B'+nl+':N'+nl); cv('B'+nl,'             - 최근 원자재 공급 및 자재 단가 변동이 빈번하여 유효기간 내에도 주요 자재 가격 또는 현장 조건 변경 시 견적 금액이 조정될 수 있습니다.',{size:10}); cov.getRow(nl).height=13.5;
 
   /* 2) 원가계산서 */
   const cost=wb.addWorksheet('원가계산서');
   cost.pageSetup={orientation:'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:1,horizontalCentered:true,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.2,footer:0.2}};
   [13,13,24,16,24,4,12,22].forEach((w,i)=>cost.getColumn(i+1).width=w);   /* ★ A열 확장(4→13) — 비목·순공사비 라벨이 안 잘리게 */
   cost.mergeCells('A1:H1'); const c1=cost.getCell('A1'); c1.value='공  사  원  가  계  산  서'; c1.font={name:FONT,bold:true,size:18}; c1.alignment={horizontal:'center',vertical:'middle'}; cost.getRow(1).height=31;
-  cost.getCell('A3').value='공 사 명 :'; cost.getCell('A3').font={bold:true}; cost.getCell('B3').value=projectName;
+  cost.getCell('A3').value='공 사 명 :'; cost.getCell('A3').font={bold:true}; cost.getCell('B3').value=projectName; try{ cost.mergeCells('B3:D3'); const b3=cost.getCell('B3'); b3.alignment={horizontal:'left',vertical:'middle',wrapText:true}; let _w=0; for(const ch of String(projectName||'')) _w+=(/[\u0000-\u00ff]/.test(ch)?1.05:1.9); cost.getRow(3).height=Math.max(18,Math.ceil(_w/50)*15+4); cost.getCell('A3').alignment={vertical:'middle'}; }catch(_){}   /* v8.8f: 긴 공사명 줄바꿈 */
   cost.getCell('A5').value='비          목'; cost.getCell('D5').value='금          액'; cost.getCell('E5').value='구  성  비'; cost.getCell('H5').value='비          고';
   ['A5','D5','E5','H5'].forEach(a=>cost.getCell(a).alignment={horizontal:'center',vertical:'middle'});
   /* 일금 ○○○ 원정 (한글 표기) */
@@ -5764,6 +5764,11 @@ async function buildConsultingWorkbook(d){
   applyFont(photo);
 
   applyFont(cov);
+  /* v8.8f: 공종 이름(1. POUR듀얼강화방수공법(배수로) 등)이 옆 칸 때문에 잘리지 않게 A열 너비 맞춤 */
+  try{ const _tw=t=>{ let w=0; for(const ch of String(t||'')) w+=(/[\u0000-\u00ff]/.test(ch)?1.05:1.9); return w; };
+    ['일위대가표','산출내역서','집계표'].forEach(n=>{ const ws=wb.getWorksheet(n); if(!ws) return; let need=0;
+      ws.eachRow((row,r)=>{ if(r<3) return; const a=row.getCell(1), b=row.getCell(2); const av=(a.value&&typeof a.value==='object')?'':a.value; if(typeof av!=='string'||!av.trim()) return; const bv=b.value; if(bv==null||bv==='') return; need=Math.max(need,_tw(av)+2); });
+      const col=ws.getColumn(1); if(need>(col.width||8)) col.width=Math.min(46,need); }); }catch(e){ console.warn('[A열 너비]',e); }
   return wb;
 }
 
