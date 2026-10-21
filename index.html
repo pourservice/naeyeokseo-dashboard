@@ -9169,5 +9169,69 @@ window.pvRenderSheet=pvRenderSheet; window.pvOnEdit=pvOnEdit; window.pvBasicEdit
 })();
 </script>
 
+<style id="nf-os-theme">
+/* ===== v8.8f: 서비스운영본부 OS 디자인 통일 (색·글꼴·테두리만 — 기능·화면 구조는 그대로) =====
+   이 <style> 덩어리만 지우면 예전 모습으로 돌아갑니다. */
+:root{
+  --navy-950:#0F172A;--navy-900:#0F172A;--navy-800:#2563EB;
+  --teal-600:#2563EB;--teal-500:#2563EB;--teal-100:#EFF6FF;
+  --page-bg:#ffffff;--surface:#ffffff;
+  --success:#2563EB;--warning:#B45309;--danger:#B42318;--info:#2563EB;
+  --bg:#ffffff;--text:#0F172A;--text-sub:#64748B;--border:#E2E8F0;
+  --box-main:#F8FAFC;--box-sub:#ffffff;
+  --accent:#2563EB;--accent-dark:#1D4ED8;--radius:8px;
+  --ink:#0F172A;--line:#E2E8F0;--line-soft:#EEF2F6;
+}
+body{font-family:"Pretendard Variable",Pretendard,"Malgun Gothic","맑은 고딕","Segoe UI",sans-serif;background:#fff;color:#0F172A;}
+h1,h2,h3{font-family:inherit;color:#0F172A;}
+/* 왼쪽 메뉴 — OS처럼 흰 바탕 */
+.app-sidebar{background:#fff;color:#334155;border-right:1px solid #E2E8F0;}
+.app-sidebar .sb-brand{border-bottom:1px solid #E2E8F0;}
+.app-sidebar .sb-sys{color:#0F172A;}
+.app-sidebar .sb-co{color:#64748B;}
+.app-sidebar .sb-group{color:#94A3B8;}
+.app-sidebar .sb-link{color:#334155;}
+.app-sidebar .sb-link.sub{color:#64748B;}
+.app-sidebar .sb-link:hover{background:#F8FAFC;color:#0F172A;}
+.app-sidebar .sb-link.active{background:#EFF6FF;border-left-color:#2563EB;color:#1D4ED8;}
+.app-sidebar .sb-badge{background:#F1F5F9;color:#64748B;}
+.app-sidebar .sb-badge.build{background:#FFF7ED;color:#B45309;}
+.app-sidebar .sb-foot{border-top:1px solid #E2E8F0;color:#94A3B8;}
+/* 위 메뉴줄 */
+.app-topbar{background:#fff;border-bottom:1px solid #E2E8F0;}
+.app-topbar .tb-dash{background:#2563EB;}
+.app-topbar .tb-user .av{background:#0F172A;}
+/* 홈 상단 배너 — 진한 남색 → 흰 카드 */
+#view-home .home-hero{background:#fff;border:1px solid #E2E8F0;color:#0F172A;border-radius:8px;}
+#view-home .home-hero h1{color:#0F172A;}
+#view-home .home-hero p{color:#64748B;}
+#view-home .hero-stat{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;}
+#view-home .hero-stat .hs-l,#view-home .hero-stat .hs-v .u{color:#64748B;}
+#view-home .hero-stat .hs-v,#view-home .hero-stat.urgent .hs-v{color:#0F172A;}
+/* 카드·패널 — 평평하게, 얇은 테두리 */
+.panel{border:1px solid #E2E8F0;border-radius:8px;box-shadow:none;}
+.card,.qty-card{border-color:#E2E8F0;border-radius:8px;}
+/* 검토 대시보드 */
+#dash-app{--ink:#0F172A;--ink-soft:#334155;--ink-faint:#64748B;--line:#E2E8F0;--line-soft:#EEF2F6;--accent:#2563EB;--final:#2563EB;--team:#2563EB;--draft:#94A3B8;--done:#0F172A;--danger:#B42318;--shadow:none;}
+#dash-app header{border-bottom:1px solid #E2E8F0;}
+#dash-app .btn{border-radius:6px;}
+#dash-app .btn-primary{background:#2563EB;color:#fff;}
+#dash-app .btn-primary:hover{background:#1D4ED8;}
+#dash-app .btn-ghost{background:#fff;color:#334155;border:1px solid #D0D5DD;}
+#dash-app .btn-ghost:hover{background:#F8FAFC;}
+/* 버튼 */
+.btn{border-radius:6px;}
+.btn.ghost,.btn.btn-ghost{background:#fff;color:#334155;border-color:#D0D5DD;}
+.btn.ghost:hover,.btn.btn-ghost:hover{background:#F8FAFC;opacity:1;}
+input,select,textarea{border-color:#E2E8F0;}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.15);}
+/* 화면 코드 안에 직접 적힌 예전 남색 → OS 파랑/글자색으로 (글자색과 배경색을 구분해서) */
+[style*="background:#394867"],[style*="background: #394867"],[style*="background-color:#394867"],[style*="background:#212A3E"],[style*="background: #212A3E"],[style*="background:#2a3550"]{background:#2563EB!important;border-color:#2563EB!important;color:#fff!important;}
+[style^="color:#394867"],[style*=";color:#394867"],[style*=" color:#394867"],[style*=";color: #394867"]{color:#2563EB!important;}
+[style^="color:#212A3E"],[style*=";color:#212A3E"],[style*=" color:#212A3E"]{color:#0F172A!important;}
+[style*="border:1px solid #394867"],[style*="border-color:#394867"]{border-color:#2563EB!important;}
+[style*="border:1px solid #D8DEE6"],[style*="border:1px solid #d5dbe5"],[style*="border:1px solid #E4E7EC"],[style*="border:1px solid #E3E8EF"]{border-color:#E2E8F0!important;}
+[style*="background:#F1F6F9"],[style*="background:#F4F6F9"]{background:#F8FAFC!important;}
+</style>
 </body>
 </html>
