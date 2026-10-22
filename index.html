@@ -1211,7 +1211,8 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
         <label>검토방 추가 특이사항 <span class="hint">(선택 — 자동 특이사항과 <b>함께</b> 검토방 카드에 기재됩니다 · 한 줄에 하나)</span></label>
         <textarea id="reviewAddNotes" placeholder="예) 옥탑 방수 범위 발주처 협의 필요&#10;착공 전 통신장비 이설 요청&#10;급수는 발주처 제공" style="min-height:64px;"></textarea>
       </div>
-      <div id="hsPanel" style="margin:4px 0 14px;padding:12px 14px;border:1px solid #D8DEE6;border-radius:9px;background:#FCFCFD;">
+      <button type="button" id="hsToggle" class="btn ghost" onclick="(function(b){var p=document.getElementById('hsPanel');var on=p.style.display==='none';p.style.display=on?'':'none';b.textContent=on?'📋 최종본 현장설명회 자료 검토 닫기 ▲':'📋 최종본 현장설명회 자료 검토 ▼';})(this)" style="margin:4px 0 12px;font-size:12.5px;">📋 최종본 현장설명회 자료 검토 ▼</button>
+      <div id="hsPanel" style="display:none;margin:4px 0 14px;padding:12px 14px;border:1px solid #D8DEE6;border-radius:9px;background:#FCFCFD;">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <div style="flex:1;min-width:240px;"><div style="font-weight:700;font-size:13.5px;color:#212A3E;">📋 현장설명회 자료 검토 <span id="hsProg" style="font-weight:400;font-size:12px;color:#475467;margin-left:6px;"></span></div>
             <div style="font-size:12px;color:#768194;margin-top:2px;">최종본 전에 현설 PDF·사진을 올리면, 지금 내역서(동·공종·공사범위)와 대조해서 <b>추가·누락 의심 / 의도 확인 / 필수 확인</b> 항목을 보여줘요.</div></div>
@@ -1243,7 +1244,6 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     </div>
     <div class="wf-foot">
       <button class="wf-nav" onclick="wfStep(4)">← <span class="nx">④</span> 물량검증</button><div class="sp"></div>
-      <button class="wf-nav" onclick="sendToReviewBoard(true)" title="이미 올린 카드 댓글에 수정본(N차) 엑셀 재첨부">📤 수정본 재첨부</button>
       <button class="wf-nav primary" onclick="sendToReviewBoard()">검토방에 올리기</button></div>
   </div>
 
@@ -4898,7 +4898,7 @@ function renderHome(){
     else{
       rec.innerHTML=hist.slice(0,6).map(function(s){
         var site=(s.meta&&(s.meta.client||s.meta.site))||'(현장 미지정)';
-        var no=(s.meta&&s.meta.issueNo)?s.meta.issueNo+'회차':'';
+        var no=(s.meta&&s.meta.issueNo)?((typeof nfIssueLabel==='function')?nfIssueLabel(s.meta):(s.meta.issueNo+'회차')):'';
         var tot=(s.totals&&s.totals.total)?nfNum(s.totals.total)+'원':'';
         var when=nfFmtDate(s.meta&&s.meta.issuedAt);
         var vf=(s.meta&&s.meta.verification&&s.meta.verification.verdict)||'';
@@ -5094,6 +5094,10 @@ function issueReport(){
   const snap=buildSnapshot(), site=(snap.meta.client||snap.meta.site)||'(현장 미지정)', h=loadHistory();
   const prev=h.filter(x=>(x.meta.client||x.meta.site)===site).reduce((m,x)=>Math.max(m,x.meta.issueNo||0),0);
   snap.meta.issueNo=prev+1; snap.meta.issuedAt=new Date().toISOString(); snap.id='rpt_'+Date.now();
+  /* v8.9: 파일명 구분이 'N안'이면 발행이력에 '2안 1회차'처럼 안별 회차를 따로 기록 (전체 회차 issueNo는 그대로) */
+  try{ const fk=((document.getElementById('fnKind')||{}).value)||'', fno=parseInt(((document.getElementById('fnNo')||{}).value),10)||1;
+    snap.meta.fnStage=((document.getElementById('fnStage')||{}).value)||''; snap.meta.fnKind=fk; snap.meta.fnNo=fno;
+    if(fk==='안'){ snap.meta.altNo=fno; snap.meta.altIssueNo=h.filter(x=>(x.meta.client||x.meta.site)===site && x.meta.altNo===fno).reduce((m,x)=>Math.max(m,x.meta.altIssueNo||0),0)+1; } }catch(_){}
   h.unshift(snap); saveHistory(h);
   const prevKey=currentSatKey();
   try{ if(!Object.keys(crossState.sat||{}).length){ const d0=satStoreRead()[prevKey]; if(d0&&d0.sat) crossState.sat=Object.assign({}, d0.sat); } }catch(_){}   /* v8.6: 화면에 안 불러온 임시 위성사진도 발행본으로 같이 옮김(지워지지 않게) */
@@ -5102,15 +5106,17 @@ function issueReport(){
   try{ savePhotosTo(snap.id); photoShareAll(snap.id); }catch(_){}   /* v8.6: 현장사진도 이 발행본에 저장 → 발행이력에서 다시 열어도 유지 (v8.7: 팀 공유에도 올림) */
   try{ if(typeof satShareAll==='function') satShareAll(); }catch(_){}   /* ★ 팀 공유 연결 시 발행과 함께 위성사진 공유 */
   renderBanner(); renderHistory();
-  alert('발행 완료 — '+site+' '+snap.meta.issueNo+'회차로 발행이력에 저장되었습니다.');
+  alert('발행 완료 — '+site+' '+nfIssueLabel(snap.meta)+'로 발행이력에 저장되었습니다.');
 }
+function nfIssueLabel(m){ m=m||{}; return m.altNo?(m.altNo+'안 '+(m.altIssueNo||1)+'회차'):((m.issueNo||'-')+'회차'); }   /* v8.9: 안별 회차 표시 */
+window.nfIssueLabel=nfIssueLabel;
 function renderHistory(){
   let h=loadHistory(); const el=$('#histList'); if(!el)return;
   /* v8.7: 검색 + 정렬 — 현장별로 묶어 1회차→2회차… 순서대로 */
   const hq=((document.getElementById('histSearch')||{}).value||'').trim().toLowerCase().replace(/\s+/g,'');
   const hs=((document.getElementById('histSort')||{}).value)||'site';
   const total=h.length;
-  if(hq) h=h.filter(s=>{ const t=[(s.meta.client||''),(s.meta.site||''),(s.meta.memo||''),fmtDate(s.meta.issuedAt),(s.meta.issueNo||'')+'회차'].join(' ').toLowerCase().replace(/\s+/g,''); return t.indexOf(hq)>=0; });
+  if(hq) h=h.filter(s=>{ const t=[(s.meta.client||''),(s.meta.site||''),(s.meta.memo||''),fmtDate(s.meta.issuedAt),(s.meta.issueNo||'')+'회차',nfIssueLabel(s.meta)].join(' ').toLowerCase().replace(/\s+/g,''); return t.indexOf(hq)>=0; });
   const ts=s=>String(s.meta.issuedAt||'');
   if(hs==='new') h=h.slice().sort((a,b)=>ts(b).localeCompare(ts(a)));
   else if(hs==='old') h=h.slice().sort((a,b)=>ts(a).localeCompare(ts(b)));
@@ -5119,7 +5125,7 @@ function renderHistory(){
   if(total && !h.length){ el.innerHTML='<div class="empty">‘'+((document.getElementById('histSearch')||{}).value||'')+'’ 검색 결과가 없어요.</div>'; return; }
   if(!h.length){ el.innerHTML='<div class="empty">아직 발행한 내역서가 없습니다. 견적 산출 화면에서 [발행 (이력 저장)]을 누르면 여기에 현장·회차별로 쌓입니다.</div>'; return; }
   el.innerHTML='<div style="overflow-x:auto;"><table><thead><tr><th class="t-left">현장명</th><th class="t-center">회차</th><th>발행일시</th><th class="t-num">총공사비</th><th>메모(수정사유)</th><th class="t-center">관리</th></tr></thead><tbody>'+
-    h.map(s=>`<tr><td class="t-left">${(s.meta.client||s.meta.site||'-')} <button class="btn xs ghost" title="현장명 바꾸기 (같은 이름 발행본 골라서)" onclick="nfHistRenameAsk('${String(s.meta.client||s.meta.site||'').replace(/'/g,"\\'")}',null,null,'${s.id}')" style="padding:0 5px;">✏</button></td><td class="t-center">${s.meta.issueNo||'-'}회차</td><td>${fmtDate(s.meta.issuedAt)}</td><td class="t-num">${won((s.totals&&s.totals.total)||0)} 원</td><td><input type="text" value="${(s.meta.memo||'').replace(/"/g,'&quot;')}" placeholder="수정사유 등" oninput="updHistMemo('${s.id}',this.value)" style="min-width:150px;"></td><td class="t-center" style="white-space:nowrap;"><button class="btn xs" onclick="editFromHistory('${s.id}')">수정</button><button class="btn xs ghost" onclick="viewFromHistory('${s.id}')">보기</button><button class="btn xs ghost" onclick="exportSnapshotById('${s.id}')">.json</button><button class="btn xs ghost" onclick="deleteHistory('${s.id}')">삭제</button></td></tr>`).join('')+'</tbody></table></div>';
+    h.map(s=>`<tr><td class="t-left">${(s.meta.client||s.meta.site||'-')} <button class="btn xs ghost" title="현장명 바꾸기 (같은 이름 발행본 골라서)" onclick="nfHistRenameAsk('${String(s.meta.client||s.meta.site||'').replace(/'/g,"\\'")}',null,null,'${s.id}')" style="padding:0 5px;">✏</button></td><td class="t-center">${nfIssueLabel(s.meta)}</td><td>${fmtDate(s.meta.issuedAt)}</td><td class="t-num">${won((s.totals&&s.totals.total)||0)} 원</td><td><input type="text" value="${(s.meta.memo||'').replace(/"/g,'&quot;')}" placeholder="수정사유 등" oninput="updHistMemo('${s.id}',this.value)" style="min-width:150px;"></td><td class="t-center" style="white-space:nowrap;"><button class="btn xs" onclick="editFromHistory('${s.id}')">수정</button><button class="btn xs ghost" onclick="viewFromHistory('${s.id}')">보기</button><button class="btn xs ghost" onclick="exportSnapshotById('${s.id}')">.json</button><button class="btn xs ghost" onclick="deleteHistory('${s.id}')">삭제</button></td></tr>`).join('')+'</tbody></table></div>';
 }
 /* v8.7: 발행이력 현장명 바꾸기 — 검토방 카드 이름을 바꾸면 같이 묻고, 발행이력 ✏로도 바꿈. 같은 이름 다른 현장이 있으면 골라서 */
 function nfHistRename(ids, newName){ const h=loadHistory(); let n=0; h.forEach(s=>{ if(ids.indexOf(s.id)<0) return; s.meta.client=newName; s.meta.site=newName; if(s.state){ s.state.client=newName; } n++; }); if(n){ saveHistory(h); try{ renderHistory(); }catch(_){} try{ renderBanner(); }catch(_){} try{ if(typeof loadedReportId!=='undefined' && ids.indexOf(loadedReportId)>=0){ const c=document.getElementById('client'); if(c){ c.value=newName; } } }catch(_){} } return n; }
@@ -9324,9 +9330,9 @@ body{font-family:"Pretendard Variable",Pretendard,"Malgun Gothic","맑은 고딕
 h1,h2,h3{font-family:inherit;color:#0F172A;}
 /* 왼쪽 메뉴 — OS처럼 흰 바탕 */
 .app-sidebar{background:#fff;color:#334155;border-right:1px solid #E2E8F0;}
-.app-sidebar .sb-brand{border-bottom:1px solid #E2E8F0;}
+.app-sidebar .sb-brand{border-bottom:1px solid #E2E8F0;background:#EFF6FF;}   /* 이름 칸만 연한 파랑 */
 .app-sidebar .sb-sys{color:#0F172A;}
-.app-sidebar .sb-co{color:#64748B;}
+.app-sidebar .sb-co{color:#2563EB;}
 .app-sidebar .sb-group{color:#94A3B8;}
 .app-sidebar .sb-link{color:#334155;}
 .app-sidebar .sb-link.sub{color:#64748B;}
