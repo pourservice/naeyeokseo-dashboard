@@ -6753,6 +6753,7 @@ function rand(){return Math.random().toString(36).slice(2,9);}
 
 /* ---------- checklist ---------- */
 function buildChecklist(r){
+  return '';   /* v8.9: 팀원·팀장 검토 체크칸 숨김 — 검토는 댓글 [✅ 검토 완료]/[🔁 수정 요청]으로 남김 (예전 체크 기록은 데이터에 그대로) */
   const stg=stageOf(r); if(!stg) return '';
   if(stg.round){
     const ch=(r.checks&&r.checks[stg.round])||{};
@@ -6901,7 +6902,7 @@ function cardEl(r){
       ${r.req?`<div class="row"><span class="k">요청사</span><span>${esc(r.req)}</span></div>`:''}
       ${r.due?`<div class="row"><span class="k">마감</span><span class="mono">${esc(r.due)}</span></div>`:''}
       ${r.rev?`<div class="row"><span class="k">검토자</span><span>${esc(r.rev)}</span></div>`:''}
-      <div class="row"><span class="k">공사범위</span><span>${(r.scope||r.proj||'').trim()?esc((r.scope||r.proj||'').trim()):'<span style="color:var(--ink-faint)">미입력</span>'}</span></div>
+      <div class="row"><span class="k">공사범위</span><span>${(r.proj||r.scope||'').trim()?esc((r.proj||r.scope||'').trim()):'<span style="color:var(--ink-faint)">미입력</span>'}</span></div>
     </div>
     ${(function(){ const n=(r.notes||'').trim(); if(!n) return ''; const lines=n.split(/\n+/).map(x=>x.replace(/^[-•*·]\s*/,'').trim()).filter(Boolean); if(!lines.length) return ''; return '<div class="spec-box"><div class="sb-h">특이사항</div><ul>'+lines.map(l=>'<li>'+nfMarkHtml(l,null,r.marks)+'</li>').join('')+'</ul></div>'; })()}
     ${buildChecklist(r)}
@@ -7616,9 +7617,11 @@ function __renderDetailInner(){
     const bodyHtml=editing
       ? `<textarea id="cEditTa_${c.id}" class="c-edit-ta" style="width:100%;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--accent,#394867);border-radius:7px;background:#fff;color:var(--ink);resize:vertical;min-height:52px;line-height:1.5;margin-top:4px;">${esc(c.text||'')}</textarea><div style="margin-top:5px;display:flex;gap:6px;"><button class="mini-btn primary" data-editsave="${c.id}" style="background:var(--ink);color:var(--paper);border-color:var(--ink);">저장</button><button class="mini-btn" data-editcancel="${c.id}">취소</button></div>`
       : (c.text?`<div class="c-text">${nfCmtHtml(c.text,c)}</div>`:'');
+    const rvB=c.rv?`<div style="display:inline-flex;gap:6px;align-items:center;margin:3px 0 2px;padding:2px 9px;border-radius:10px;font-size:12px;font-weight:600;background:#F2F4F7;color:#344054;">${c.rv==='ok'?'✅':'🔁'} ${esc(c.author)} ${c.rv==='ok'?'검토 완료':'수정 요청'}${c.rvStage?` <span style="font-weight:600;opacity:.8;">· ${esc(c.rvStage)} 단계</span>`:''}</div>`:'';
     return sep+`
     <div class="cmt">
       <div class="c-top"><span class="c-author">${esc(c.author)}</span><span class="c-time">${timeLbl}</span>${tools}</div>
+      ${rvB}
       ${bodyHtml}
       ${editing
         ? `<div class="c-files fcards">${(c.links||[]).map((l,j)=>`<div>${fileCard(l,(c.id===lfCid&&j===lfIdx))}<div style="display:flex;gap:6px;margin:4px 0 2px 24px;"><button class="mini-btn" data-cfrep="${c.id}|${j}" title="이 파일을 새 파일로 갈아끼우기">🔁 교체</button><button class="mini-btn" data-cfdel="${c.id}|${j}" title="이 댓글에서 파일 빼기" style="color:#B33;">✕ 빼기</button></div></div>`).join('')}<div><button class="mini-btn" data-cfadd="${c.id}">＋ 파일 추가</button></div></div>`
@@ -7630,7 +7633,7 @@ function __renderDetailInner(){
       ${dd?`<span class="dday ${dd.cls}">${dd.txt}</span>`:''}<button class="d-close" id="dClose">×</button></div>
     <div class="d-meta">
       ${r.req?`<span><b>요청사</b> ${esc(r.req)}</span>`:''}${r.addr?`<span><b>주소</b> ${esc(r.addr)}</span>`:''}${r.due?`<span><b>마감</b> ${esc(r.due)}</span>`:''}
-      ${r.amt?`<span><b>금액</b> ${esc(r.amt)}</span>`:''}${r.finalAmt?`<span><b>최종금액</b> <span style="font-weight:600;color:var(--ink)">${esc(r.finalAmt)}</span></span>`:''}${r.rev?`<span><b>검토자</b> ${esc(r.rev)}</span>`:''}<span><b>공사범위</b> ${(r.scope||r.proj||'').trim()?esc((r.scope||r.proj||'').trim()):'미입력'}</span>
+      ${r.amt?`<span><b>금액</b> ${esc(r.amt)}</span>`:''}${r.finalAmt?`<span><b>최종금액</b> <span style="font-weight:600;color:var(--ink)">${esc(r.finalAmt)}</span></span>`:''}${r.rev?`<span><b>검토자</b> ${esc(r.rev)}</span>`:''}<span><b>공사범위</b> ${(r.proj||r.scope||'').trim()?esc((r.proj||r.scope||'').trim()):'미입력'}</span>
       <span style="cursor:pointer;color:var(--accent)" id="dEdit">현장정보 편집 ↗</span></div>
     ${nfRateBoxHtml(r,'margin-bottom:13px;')}
     ${latestBox}
@@ -7658,7 +7661,7 @@ function __renderDetailInner(){
         <button class="mini-btn" id="cFile">📎 파일 첨부 (≤50MB · 드래그 OK)</button>
         <button class="mini-btn" id="cGDrive" onclick="nfGdConnect()" title="구글 드라이브(팀 계정)에 연결하면 첨부가 드라이브 15GB에 저장됩니다">📁 드라이브 연결</button>
         <button class="mini-btn" id="cLink">🔗 드라이브 링크</button>
-        <button class="btn btn-primary" id="cPost" style="margin-left:auto">댓글 등록</button>
+        <span style="display:inline-flex;gap:6px;align-items:center;margin-left:auto;"><button class="mini-btn" id="cRvOk" title="작성자 이름으로 ‘검토 완료’ 댓글을 남겨요 (입력칸에 쓴 내용은 뒤에 붙어요)" >✅ 검토 완료</button><button class="mini-btn" id="cRvFix" title="입력칸에 수정할 내용을 쓰고 누르세요 — 작성자 이름으로 ‘수정 요청’ 댓글이 남아요" >🔁 수정 요청</button><button class="btn btn-primary" id="cPost">댓글 등록</button></span>
       </div>
     </div>`;
   $('#dClose').onclick=closeDetail;
@@ -7692,7 +7695,8 @@ function __renderDetailInner(){
     comp.addEventListener('drop',async e=>{ e.preventDefault(); comp.style.outline=''; comp.style.background=''; const fs=Array.from((e.dataTransfer&&e.dataTransfer.files)||[]); try{ if(!nfRelayUrl()) await nfGdMaybeAutoConnect(); }catch(_){} for(const f of fs){ await attachCommentFile(f); } });
   })();
   $('#cLink').onclick=()=>{const u=prompt('드라이브/공유 링크 URL:');if(u&&u.trim()){const n=prompt('표시 이름(선택):')||'';detailLinks.push({name:n.trim()||u.trim(),url:u.trim()});renderStaged();}};
-  $('#cPost').onclick=postComment;
+  $('#cPost').onclick=()=>postComment();
+  if($('#cRvOk')) $('#cRvOk').onclick=()=>postComment('ok'); if($('#cRvFix')) $('#cRvFix').onclick=()=>postComment('fix');   /* v8.9: 검토 기록 버튼 */
   (function(){ const asel=$('#c_author'); if(!asel) return; asel.onchange=async()=>{ if(asel.value==='__add__'){ const nm=prompt('추가할 이름을 입력하세요:'); if(nm&&nm.trim()){ const v=nm.trim(); if(TEAM.indexOf(v)<0){ TEAM.push(v); try{ await store.set('wp_team',JSON.stringify(TEAM)); }catch(e){} } lastAuthor=v; } renderDetail(); } }; })();
   try{ nfThumbs($('#detailModal')); }catch(_){}   /* v8.8: 사진 미리보기 */
   $('#detailModal').querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>setStageDetail(r,b.dataset.st));
@@ -7731,18 +7735,31 @@ function __renderDetailInner(){
 }
 function renderStaged(){const w=$('#staged');if(!w)return;w.innerHTML=detailLinks.map((l,i)=>`<span class="chip link">🔗 <span class="cn">${esc(l.name||l.url)}</span> <span class="x" data-rm="${i}">✕</span></span>`).join('');w.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{detailLinks.splice(+x.dataset.rm,1);renderStaged();});}
 async function setStageDetail(r,st){if(r.status!==st){if(!nfConfirmStage(r,st))return;r.status=st;await maybeSheetLog(r,st);renderDetail();render();await save();}}
-async function postComment(){
+/* v8.9: 검토 기록 요약 — 단계별로 사람마다 마지막 기록(✅완료/🔁수정요청). 댓글은 최종본·완료까지 그대로 남음 */
+function nfRvSummary(r,mini){ try{ const cs=(r.comments||[]).filter(c=>c&&c.rv); if(!cs.length) return '';
+  const by={}; cs.forEach(c=>{ const st=c.rvStage||''; by[st]=by[st]||{}; by[st][c.author]=c; });
+  const md=t=>{ const d=new Date(t); return isNaN(d)?'':(d.getMonth()+1)+'/'+d.getDate(); };
+  const rows=Object.keys(by).map(st=>{ const ppl=Object.values(by[st]).map(c=>`<span style="white-space:nowrap;color:${c.rv==='ok'?'#067647':'#B54708'};font-weight:700;">${c.rv==='ok'?'✅':'🔁'} ${esc(c.author)}${mini?'':` <span style="font-weight:400;color:#98A2B3;">${md(c.ts)}</span>`}</span>`).join(mini?' ':' · ');
+    return mini?`${st?`<span style="color:#8793a3;">${esc(st)}</span> `:''}${ppl}`:`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:3px 0;"><span style="min-width:64px;font-size:12px;color:#667085;font-weight:600;">${esc(st||'검토')}</span>${ppl}</div>`; });
+  return mini?`<div style="font-size:11.5px;margin-top:3px;line-height:1.5;">${rows.join(' · ')}</div>`
+    :`<div style="border:1px solid #E4E7EC;border-radius:9px;padding:7px 11px;margin:8px 0 10px;font-size:12.5px;background:#FCFCFD;"><div style="font-weight:700;margin-bottom:2px;">검토 기록 <span style="font-weight:400;color:#98A2B3;font-size:11.5px;">— 단계별 사람마다 마지막 기록 · 자세한 내용은 아래 댓글</span></div>${rows.join('')}</div>`;
+}catch(_){ return ''; } }
+async function postComment(rv){
   const r=reviews.find(x=>x.id===currentDetailId); if(!r)return;
   const author=($('#c_author').value.trim())||'(미입력)';
-  const text=$('#c_text').value.trim();
-  if(!text && !detailLinks.length){toast('내용이나 파일/링크를 입력하세요');return;}
+  let text=$('#c_text').value.trim();
+  if(rv){ if(author==='(미입력)'||author==='__add__'){ alert('누가 검토했는지 남기려면 왼쪽 ‘작성자’에서 이름을 먼저 골라 주세요.'); try{ $('#c_author').focus(); }catch(_){} return; }
+    if(rv==='fix' && !text){ alert('수정할 내용을 입력칸에 적고 [🔁 수정 요청]을 눌러 주세요.'); try{ $('#c_text').focus(); }catch(_){} return; } }
+  if(!rv && !text && !detailLinks.length){toast('내용이나 파일/링크를 입력하세요');return;}
   r.comments=r.comments||[];
-  r.comments.push({id:'c'+Date.now()+rand(),author,ts:new Date().toISOString(),text,links:detailLinks.slice()});
+  const __c={id:'c'+Date.now()+rand(),author,ts:new Date().toISOString(),text,links:detailLinks.slice()};
+  if(rv){ __c.rv=rv; try{ __c.rvStage=stageOf(r).label; }catch(_){} }
+  r.comments.push(__c);
   lastAuthor=author; await store.set(AKEY,author);
   detailLinks=[];
   const __hasXls=(r.comments[r.comments.length-1].links||[]).some(nfIsXls);
   await save(); renderDetail(); render();
-  toast(__hasXls?'수정본이 등록되었습니다 — 이 엑셀이 최신 내역서로 표시됩니다':'댓글이 등록되었습니다');
+  toast(rv?(rv==='ok'?'✅ 검토 완료를 남겼어요':'🔁 수정 요청을 남겼어요'):(__hasXls?'수정본이 등록되었습니다 — 이 엑셀이 최신 내역서로 표시됩니다':'댓글이 등록되었습니다'));
   const th=$('.thread'); if(th)th.scrollTop=th.scrollHeight;
   /* ★ @팀원 태그가 있으면 잔디 검토 토픽으로 알림 발송 */
   try{
@@ -8461,7 +8478,7 @@ function openModal(r){
   $('#f_due').value=r?r.due:'';$('#f_amt').value=r?r.amt:'';$('#f_rev').value=r?r.rev:'';
   if($('#f_addr'))$('#f_addr').value=r?(r.addr||''):'';
   if($('#f_final'))$('#f_final').value=r?(r.finalAmt||''):'';
-  if($('#f_scope'))$('#f_scope').value=r?(r.scope||r.proj||''):'';
+  if($('#f_scope'))$('#f_scope').value=r?(r.proj||r.scope||''):'';   /* v8.9: 자세한 공사범위(내역서 공사범위 칸) 우선 */
   $('#f_status').value=r?r.status:'draft';$('#f_notes').value=r?r.notes:'';
   if($('#f_xls'))$('#f_xls').value='';if($('#f_cad'))$('#f_cad').value='';if($('#f_links'))$('#f_links').value='';
   $('#delBtn').style.display=r?'inline-block':'none';
@@ -8497,7 +8514,7 @@ async function collectModalFiles(){
 async function saveForm(){
   const id=$('#f_id').value;
   const data={site:$('#f_site').value.trim(),req:$('#f_req').value.trim(),gong:$('#f_gong').value.trim(),
-    addr:($('#f_addr')?$('#f_addr').value.trim():''), finalAmt:($('#f_final')?$('#f_final').value.trim():''), scope:($('#f_scope')?$('#f_scope').value.trim():''),
+    addr:($('#f_addr')?$('#f_addr').value.trim():''), finalAmt:($('#f_final')?$('#f_final').value.trim():''), scope:($('#f_scope')?$('#f_scope').value.trim():''), proj:($('#f_scope')?$('#f_scope').value.trim():''),
     due:$('#f_due').value,amt:$('#f_amt').value.trim(),rev:$('#f_rev').value.trim(),status:$('#f_status').value,notes:$('#f_notes').value.trim()};
   if(!data.site){toast('현장명을 입력하세요');return;}
   const atts=await collectModalFiles();
@@ -8562,7 +8579,7 @@ window.NF_DASH = {
     if(o.reopen){ if(r.status==='draftSent') r.status='draft'; else if(r.status==='done') r.status='final'; }   /* 완료 카드면 재검토 단계로 */
     if(o.stage==='최종본' && (r.status==='draft'||r.status==='draftSent')) r.status='final';
     if(o.rptId){ r.rptIds=Array.isArray(r.rptIds)?r.rptIds:[]; if(r.rptIds.indexOf(o.rptId)<0) r.rptIds.push(o.rptId); }   /* v8.7: 이 카드로 올린 발행본 기록 → 이름 바꿀 때 같이 */   /* v8.7: 최종본으로 올리면 카드도 '최종본 검토'로 */
-    if(o.addNotes){ const cur=String(r.notes||'').split(/\n/).map(x=>x.trim()).filter(Boolean); String(o.addNotes).split(/\n/).map(x=>x.trim()).filter(Boolean).forEach(x=>{ if(cur.indexOf(x)<0) cur.push(x); }); r.notes=cur.join('\n'); }   /* v8.7: 검토방 추가 특이사항 → 카드 특이사항에도 반영 */
+    if(false && o.addNotes){ const cur=String(r.notes||'').split(/\n/).map(x=>x.trim()).filter(Boolean); String(o.addNotes).split(/\n/).map(x=>x.trim()).filter(Boolean).forEach(x=>{ if(cur.indexOf(x)<0) cur.push(x); }); r.notes=cur.join('\n'); }   /* v8.7: 검토방 추가 특이사항 → 카드 특이사항에도 반영 */
     if(o.finalAmt) r.finalAmt=o.finalAmt; if(Array.isArray(o.rates)&&o.rates.length) r.rates=o.rates;
     if(o.author){ lastAuthor=o.author; try{ await store.set(AKEY,o.author); }catch(_){} }
     await save(); render(); openDetail(r);
