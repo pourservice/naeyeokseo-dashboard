@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<script>try{ window.__nfBootHash=location.hash||""; }catch(e){}</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>넷폼 | POUR 컨설팅내역서 자동화 v7.0 · 자료접수 안내</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1236,7 +1237,8 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
       <div style="margin-top:14px;padding:12px 14px;border:1px solid #D8DEE6;border-radius:9px;background:#F1F6F9;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
         <div style="flex:1;min-width:240px;"><div style="font-weight:700;font-size:13.5px;color:#212A3E;">📤 검토방 카드에 수정본 재첨부</div>
           <div style="font-size:12px;color:#768194;margin-top:2px;">이미 검토방에 올린 현장을 수정했으면, 새 카드 대신 <b>그 카드 댓글</b>에 '초안본 2차·3차…' 엑셀과 수정 내용을 올립니다.</div></div>
-        <button class="btn" onclick="sendToReviewBoard(true)" style="background:#394867;color:#fff;border-color:#394867;font-weight:700;">📤 수정본 재첨부</button>
+        <button class="btn" onclick="sendToReviewBoard(true)" style="background:#394867;color:#fff;border-color:#394867;font-weight:700;" title="검토 전 파일 — 파일명에 '초안본 수정중'처럼 붙어요">📤 수정본 재첨부</button>
+        <button class="btn" onclick="sendToReviewBoard(true,'done')" style="background:#fff;color:#067647;border-color:#067647;font-weight:700;" title="팀장님 검토가 끝난 파일 — 파일명에 '수정중' 없이 '초안본'으로 올라가요">✅ 검토완료본 재첨부</button>
       </div>
     </div>
     <div class="wf-foot">
@@ -5782,6 +5784,7 @@ function buildEstimateFileName(){
   var label=stage;
   if(kind==='차') label=stage+' '+no+'차';
   else if(kind==='안') label=stage+' '+no+'안';
+  try{ if(window.__nfFnSuffix) label+=' '+window.__nfFnSuffix; }catch(_){}   /* v8.9: 검토방에 올리는 파일 = '초안본 수정중' / 검토 완료본은 그대로 */
   var client=((document.getElementById('client')||{}).value)||'';
   var project=((document.getElementById('project')||{}).value)||'';
   var site=nfSafeName(client||project||'현장');
@@ -8599,11 +8602,13 @@ function gatherSpecialNotes(){
 }
 window.gatherSpecialNotes=gatherSpecialNotes;
 /* v7.9: 재발행 선택창 — 기존 카드 댓글에 수정본(초안본/최종본 N차)으로 올리거나, 새 카드로 등록 */
-function nfReissueDialog(site, cards, autoNotes, forced){
+function nfReissueDialog(site, cards, autoNotes, forced, doneMode){
   return new Promise(res=>{
     const old=document.getElementById('nfReissue'); if(old) old.remove();
     const esc1=x=>String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    const TYPES=[['수정본 재발행','수정본 {n}차 재발행'],['검토완료 재발송','검토완료 재발송 ({n}차)'],['현설 반영 수정본','현설 반영 수정본 ({n}차)'],['금액·단가 조정','금액 조정 재발행 ({n}차)'],['최종본 발송','최종본 발송 ({n}차)'],['요청사 요청 수정','요청사 요청 수정본 ({n}차)'],['기타','재발행 ({n}차)']];
+    const TYPES=[['수정본 재발행','수정본 {n}차 재발행'],['검토완료 재발송','검토완료 재발송 ({n}차)'],['현설 반영 수정본','현설 반영 수정본 ({n}차)'],['금액·단가 조정','금액 조정 재발행 ({n}차)'],['최종본 발송','최종본 발송 ({n}차)'],['요청사 요청 수정','요청사 요청 수정본 ({n}차)'],['기타','재발행 ({n}차)'],['다른 안 추가 (같은 현장 1안·2안…)','{st} {n}안','안']];   /* v8.9: 공사범위만 다른 N안을 같은 카드에 */
+    const isAn=()=>((TYPES[+($1('rsType')||{}).value]||[])[2]==='안');
+    const pageAn=(((document.getElementById('fnKind')||{}).value)==='안');
     const team=(window.NF_DASH.team?window.NF_DASH.team():[]), la=(window.NF_DASH.lastAuthor?window.NF_DASH.lastAuthor():'');
     const c0=cards[0];
     const stageOf=c=>(c.status==='final'||c.status==='done')?'최종본':'초안본';
@@ -8619,6 +8624,7 @@ function nfReissueDialog(site, cards, autoNotes, forced){
         +'<div style="flex:1;min-width:80px;"><label style="display:block;font-weight:600;margin-bottom:4px;">차수 <span style="font-weight:400;color:#768194;font-size:11px;">0=차수 없음</span></label><input id="rsNo" type="number" min="0" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;"></div>'
         +'<div style="flex:1;min-width:110px;"><label style="display:block;font-weight:600;margin-bottom:4px;">작성자</label><select id="rsAuthor" style="width:100%;padding:7px;border:1px solid #D8DEE6;border-radius:7px;">'+[''].concat(team).map(n=>'<option'+(n===la?' selected':'')+' value="'+esc1(n)+'">'+(n||'선택')+'</option>').join('')+'</select></div>'
       +'</div>'
+      +'<label style="display:flex;gap:6px;align-items:center;justify-content:flex-start;text-align:left;margin-top:10px;font-size:13px;font-weight:600;color:#067647;"><input type="checkbox" id="rsDone" '+(doneMode?'checked':'')+' style="width:auto;flex:none;margin:0;"><span>✅ 검토 완료본 (팀장님 검토 끝) — 파일명에 \'수정중\' 안 붙임</span></label>'
       +'<div id="rsFile" style="margin-top:8px;font-size:12px;color:#768194;"></div>'
       +'<label style="display:block;font-weight:600;margin:10px 0 4px;">수정 내용 · 특이사항 <span style="font-weight:400;color:#768194;">(한 줄에 하나, @이름 태그 가능)</span></label>'
       +'<textarea id="rsText" rows="6" style="width:100%;padding:8px 9px;border:1px solid #D8DEE6;border-radius:7px;font-family:inherit;font-size:13px;line-height:1.5;resize:vertical;">- 수정 내용: \n- 특이사항: </textarea>'
@@ -8631,10 +8637,16 @@ function nfReissueDialog(site, cards, autoNotes, forced){
       +'</div></div>';
     document.body.appendChild(w);
     const $1=id=>document.getElementById(id);
-    const sync=()=>{ const c=cards.find(x=>x.id===$1('rsCard').value)||c0; const fsv=((document.getElementById('fnStage')||{}).value||''); $1('rsStage').value=(fsv==='최종본'?'최종본':stageOf(c));   /* v8.7: 발행 화면에서 최종본을 골랐으면 최종본 */ $1('rsNo').value=String((c.nX||0)+1); prev(); };
-    const prev=()=>{ const st=$1('rsStage').value, no=($1('rsNo').value===''?'1':$1('rsNo').value); let nm=''; try{ const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo'); const o=[fs&&fs.value,fk&&fk.value,fn&&fn.value]; if(fs)fs.value=st; if(fk)fk.value=(parseInt(no,10)===0?'':'차');   /* v8.6: 0차 = '초안본'/'최종본' 그대로 */ if(fn)fn.value=no; nm=buildEstimateFileName()+'.xlsx'; if(fs)fs.value=o[0]; if(fk)fk.value=o[1]; if(fn)fn.value=o[2]; }catch(_){}
+    const sync=()=>{ const c=cards.find(x=>x.id===$1('rsCard').value)||c0; const fsv=((document.getElementById('fnStage')||{}).value||''); $1('rsStage').value=(fsv==='최종본'?'최종본':stageOf(c));   /* v8.7: 발행 화면에서 최종본을 골랐으면 최종본 */ $1('rsNo').value=String(isAn()?(pageAn?Math.max(1,parseInt((document.getElementById('fnNo')||{}).value,10)||1):((c.nX||0)+1)):((c.nX||0)+1)); prev(); };
+    const prev=()=>{ const st=$1('rsStage').value, no=($1('rsNo').value===''?'1':$1('rsNo').value); let nm=''; try{ const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo'); const o=[fs&&fs.value,fk&&fk.value,fn&&fn.value]; if(fs)fs.value=st; if(fk)fk.value=(isAn()?'안':(parseInt(no,10)===0?'':'차'));   /* v8.6: 0차 = '초안본'/'최종본' 그대로 · v8.9: N안 */ if(fn)fn.value=no; window.__nfFnSuffix=(($1('rsDone')||{}).checked?'':'수정중'); try{ nm=buildEstimateFileName()+'.xlsx'; } finally { window.__nfFnSuffix=''; } if(fs)fs.value=o[0]; if(fk)fk.value=o[1]; if(fn)fn.value=o[2]; }catch(_){}
       $1('rsFile').innerHTML='올라갈 파일: <b style="color:#1E9E5A;">'+esc1(nm)+'</b>'; };
-    $1('rsCard').onchange=sync; $1('rsStage').onchange=prev; $1('rsNo').oninput=prev; sync();
+    const anText=()=>{ try{ const d=window.__lastD||compute(); const no=$1('rsNo').value||'1'; const proj=((document.getElementById('project')||{}).value||'').trim();
+        const RL={shingle:'싱글',dual:'슬라브',drain:'배수로',metal:'금속기와',pvc:'PVC',metalpaint:'박공지붕'};
+        const rt=((d&&d.works)||[]).filter(w=>w&&w.qty>0&&w.sum>0).map(w=>(RL[w.key]||w.spec||w.name)+' m² 당 '+Math.round(w.sum/w.qty).toLocaleString('ko-KR')+'원');
+        return no+'안 : #공사내역 : '+(proj||'(공사범위 입력)')+'\n#금액 : '+(rt.join(' / ')||'-')+((d&&d.total)?(' (총 '+Math.round(d.total).toLocaleString('ko-KR')+'원, VAT 별도)'):'')+'\n- 특이사항: '; }catch(e){ return '- 공사내역: \n- 금액: '; } };
+    const onType=()=>{ sync(); if(isAn()){ const ta=$1('rsText'); if(ta && (/^- 수정 내용: \s*\n- 특이사항: \s*$/.test(ta.value)||ta.dataset.an==='1')){ ta.value=anText(); ta.dataset.an='1'; } } };
+    $1('rsType').onchange=()=>{ if(/검토완료/.test((TYPES[+$1('rsType').value]||[])[0]||'')) $1('rsDone').checked=true; onType(); }; $1('rsDone').onchange=prev; if(pageAn){ $1('rsType').value=String(TYPES.length-1); }
+    $1('rsCard').onchange=sync; $1('rsStage').onchange=prev; $1('rsNo').oninput=()=>{ prev(); const ta=$1('rsText'); if(isAn()&&ta&&ta.dataset.an==='1') ta.value=anText(); }; onType();
     if($1('rsFind')) $1('rsFind').oninput=()=>{ const k=$1('rsFind').value.replace(/\s/g,'').toLowerCase(); const sel=$1('rsCard'); let first=null;
       Array.from(sel.options).forEach(o=>{ const hit=!k || o.textContent.replace(/\s/g,'').toLowerCase().indexOf(k)>=0; o.hidden=!hit; o.disabled=!hit; if(hit&&!first) first=o; });
       if(first && (sel.selectedOptions[0]||{}).disabled!==false){ sel.value=first.value; sync(); } else if(first && sel.selectedOptions[0] && sel.selectedOptions[0].hidden){ sel.value=first.value; sync(); } };
@@ -8643,15 +8655,16 @@ function nfReissueDialog(site, cards, autoNotes, forced){
     w.addEventListener('click',e=>{ if(e.target===w) close('cancel'); });
     $1('rsGo').onclick=()=>{
       const ti=TYPES[+$1('rsType').value]||TYPES[0], no=(function(v){ const n=parseInt(v,10); return isNaN(n)?1:Math.max(0,n); })($1('rsNo').value), st=$1('rsStage').value;
-      const title=(no===0 ? ti[1].replace(/\s*\(\{n\}차\)/,'').replace(/\s*\{n\}차/,'') : ti[1].replace('{n}',no)).replace(/^수정본/, st);   /* v8.6: 0 → 차수 표기 없이 */
+      const title=(ti[2]==='안') ? (st+' '+Math.max(1,no)+'안') : (no===0 ? ti[1].replace(/\s*\(\{n\}차\)/,'').replace(/\s*\{n\}차/,'') : ti[1].replace('{n}',no)).replace(/^수정본/, st);   /* v8.6: 0 → 차수 표기 없이 · v8.9: N안 */
       let body=($1('rsText').value||'').split('\n').filter(l=>l.replace(/^[-•·]\s*[^:：]*[:：]\s*$/,'').trim()!=='' || !/[:：]\s*$/.test(l)).join('\n').trim();
       if($1('rsAuto') && $1('rsAuto').checked && autoNotes) body=(body?body+'\n':'')+autoNotes;
-      close({mode:'revise', id:$1('rsCard').value, stage:st, no:no, author:$1('rsAuthor').value, title:title, reopen:$1('rsReopen').checked, text:'['+title+']'+(body?'\n'+body:'')});
+      const done=!!($1('rsDone')&&$1('rsDone').checked);
+      close({mode:'revise', done:done, kind:(ti[2]==='안'?'안':''), id:$1('rsCard').value, stage:st, no:(ti[2]==='안'?Math.max(1,no):no), author:$1('rsAuthor').value, title:title+(done?' · 검토완료':' · 수정중'), reopen:$1('rsReopen').checked, text:'['+title+(done?' · 검토완료':' · 수정중')+']'+(body?'\n'+body:'')});
     };
   });
 }
 window.nfReissueDialog=nfReissueDialog;
-window.sendToReviewBoard = async function(forceRevise){
+window.sendToReviewBoard = async function(forceRevise, reviewMode){
   try{
     if(typeof ExcelJS==='undefined'){ alert('엑셀 라이브러리(ExcelJS) 로딩 필요 — 새로고침 후 다시 시도'); return; }
     const project=(document.getElementById('project')&&document.getElementById('project').value)||'';
@@ -8661,7 +8674,8 @@ window.sendToReviewBoard = async function(forceRevise){
     if(!site && !confirm('발주처(현장명)가 비어 있습니다. 그래도 검토방에 올릴까요?')) return;
     const d=window.__lastD||compute();
     const t=new Date(),p=x=>String(x).padStart(2,'0');
-    const fname=(typeof buildEstimateFileName==='function'?buildEstimateFileName():('내역서_'+(site||'POUR')))+'.xlsx';
+    window.__nfFnSuffix=(reviewMode==='done'?'':'수정중');   /* v8.9: 검토방에 올리는 파일 이름 = 초안본 수정중 / 최종본 수정중 */
+    let fname; try{ fname=(typeof buildEstimateFileName==='function'?buildEstimateFileName():('내역서_'+(site||'POUR')))+'.xlsx'; } finally { window.__nfFnSuffix=''; }
     /* ★ 공법별 ㎡당 실행단가 (싱글·슬라브·배수로 등) */
     const RATE_LBL={shingle:'싱글',dual:'슬라브',drain:'배수로',metal:'금속기와',pvc:'PVC',metalpaint:'박공지붕'};
     let rates=((d&&d.works)||[]).filter(w=>w&&w.qty>0&&w.sum>0).map(w=>({label:(RATE_LBL[w.key]||w.spec||w.name), unit:Math.round(w.sum/w.qty)}));
@@ -8691,12 +8705,12 @@ window.sendToReviewBoard = async function(forceRevise){
         if(!ex.length){ alert('검토방에 올라간 카드가 아직 없어요. [검토방에 올리기]로 먼저 등록해 주세요.'); return; }
       }
       if(ex.length){
-        const choice=await nfReissueDialog(site, ex, notes, forceRevise===true);
+        const choice=await nfReissueDialog(site, ex, notes, forceRevise===true, reviewMode==='done');
         if(choice==='cancel') return;
         if(choice && choice.mode==='revise'){
           const fs=document.getElementById('fnStage'), fk=document.getElementById('fnKind'), fn=document.getElementById('fnNo');
-          if(fs) fs.value=choice.stage; if(fk) fk.value=(choice.no===0?'':'차'); if(fn) fn.value=String(choice.no||1); try{ fnPreview(); }catch(_){}
-          const fname2=buildEstimateFileName()+'.xlsx';
+          if(fs) fs.value=choice.stage; if(fk) fk.value=(choice.kind==='안'?'안':(choice.no===0?'':'차')); if(fn) fn.value=String(choice.no||1); try{ fnPreview(); }catch(_){}
+          window.__nfFnSuffix=(choice.done?'':'수정중'); let fname2; try{ fname2=buildEstimateFileName()+'.xlsx'; } finally { window.__nfFnSuffix=''; }
           const dataUrl2=await buildEstimateDataURL();
           const addBlk=addLines.join('\n'); let txt2=choice.text||''; if(addBlk && txt2.indexOf(addBlk)<0) txt2+=(txt2?'\n':'')+'[검토방 추가 특이사항]\n'+addBlk;   /* v8.7: 추가 특이사항은 항상 같이 올림 */
           await window.NF_DASH.addRevision({ id:choice.id, author:choice.author, text:txt2, title:choice.title, reopen:choice.reopen, stage:choice.stage, addNotes:addBlk, rptId:(typeof loadedReportId!=='undefined'?loadedReportId:null), fileName:fname2, fileDataUrl:dataUrl2, finalAmt, rates });
@@ -9174,7 +9188,126 @@ window.pvRenderSheet=pvRenderSheet; window.pvOnEdit=pvOnEdit; window.pvBasicEdit
 })();
 </script>
 
-<style id="nf-os-theme">
+<script id="nf-os-link">
+/* ===== v8.9: 서비스운영본부 OS «컨설팅 내역서 수행» 업무 연결 (추가 기능 — 기존 기능·저장 구조는 그대로) =====
+   OS 수행 화면의 업무별 「자동화 작업 열기 ↗」 → 이 앱 주소 #os=<업무 정보>로 열림.
+   · 연결 기준 = OS 수행 업무번호(workId) + 원 접수 식별값(reqId). 현장명·아파트명으로는 절대 합치지 않음.
+   · 같은 업무를 다시 열면 기존 작성본 이어 열기, 처음이면 그 업무 전용 초안 생성(반복 클릭·새로고침에도 1개).
+   · 공사 범위가 바뀌어 들어오면 기존 작성본은 그대로 보관하고 새 범위 버전 작성본을 만듦(변경 이력 기록).
+   · 작성본은 이 브라우저(localStorage 'nf_os_links_v1')에 업무별로 저장. OS로 진행상황·결과를 자동 전송하는 기능은 «미연결»
+     (서버 없음) — 결과는 OS applyAutomationResult 형식 JSON으로 내보내기만 함. */
+(function(){
+  var LKEY='nf_os_links_v1', cur=null, saveT=null;
+  function $i(id){ return document.getElementById(id); }
+  function now(){ var d=new Date(), p=function(n){ return (n<10?'0':'')+n; }; return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function hashStr(s){ var h=0,i; s=String(s||''); for(i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))|0; } return (h>>>0).toString(36); }
+  function readAll(){ try{ return JSON.parse(localStorage.getItem(LKEY)||'{}')||{}; }catch(e){ return {}; } }
+  function writeAll(a){ try{ localStorage.setItem(LKEY, JSON.stringify(a)); return true; }catch(e){ return false; } }
+  function b64urlDecode(t){ t=String(t||'').replace(/-/g,'+').replace(/_/g,'/'); while(t.length%4) t+='='; return decodeURIComponent(escape(atob(t))); }
+  /* 공사 범위 요약 문장 (앱 '공사범위' 칸에 넣을 값) — OS 확정 범위(scopeFinal.range) > 접수 원문 '공사 범위:' */
+  function scopeText(sc){ sc=sc||{}; var f=sc.final||{}; if(f.range) return String(f.range);
+    var m=String(sc.common||'').match(/공사\s*범위\s*[:：]\s*([^·\n]+)/); return m?m[1].trim():''; }
+  function scopeKey(p){ return hashStr(JSON.stringify({c:(p.scope||{}).common||'', f:(p.scope||{}).final||{}, d:(p.scope||{}).drainWork||'', t:(p.scope||{}).trades||[]})); }
+  /* 작성본 스냅샷 — 기존 buildSnapshot 사용, 자재단가 DB 등 공용 기준값은 빼고 저장(복원 시에도 덮어쓰지 않는 값) */
+  function snap(){ try{ var s=buildSnapshot(); if(s&&s.state){ delete s.state.materialsDB; delete s.state.LABOR; delete s.state.LABOR_WORK; delete s.state.LEDGER_TGT; delete s.state.EXP_RATE; } return s; }catch(e){ return null; } }
+  function validate(p){ if(!p||typeof p!=='object') return '업무 정보를 읽지 못했어요'; if(!p.workId) return 'OS 수행 업무번호(workId)가 없어요 — 접수에서 «배정·업무 시작» 후 수행 화면에서 다시 열어 주세요'; if(!p.reqId) return '원 접수 식별값(reqId)이 없어요'; return ''; }
+  function curVer(L){ return L&&L.versions&&L.versions[L.cur]; }
+
+  function banner(){ var host=$i('view-estimate'); if(!host) return; var b=$i('nfOsBanner');
+    if(!cur){ if(b) b.remove(); return; }
+    var L=readAll()[cur.workId]; var V=curVer(L);
+    if(!b){ b=document.createElement('div'); b.id='nfOsBanner'; host.insertBefore(b, host.firstChild); }
+    b.style.cssText='margin:0 0 14px;padding:10px 14px;border:1px solid #BFDBFE;background:#EFF6FF;border-radius:8px;font-size:12.5px;color:#1E3A8A;display:flex;gap:10px;align-items:center;flex-wrap:wrap;';
+    var st=cur.status==='new'?'<b style="color:#047857;">새 초안 생성</b>':cur.status==='scope'?'<b style="color:#B45309;">공사 범위 변경 → 새 버전</b>':'<b>기존 작성본 이어 열기</b>';
+    b.innerHTML='<span style="font-weight:700;">🔗 OS 업무 연결</span>'
+      +'<span>접수 <b>'+esc(L.reqNo||L.reqId)+'</b> · 업무 <b>'+esc(L.workId)+'</b> · '+esc((L.site&&L.site.name)||'')+(L.partner?(' · '+esc(L.partner)):'')+'</span>'
+      +'<span>범위 v'+(L.cur+1)+(L.versions.length>1?(' / 전체 '+L.versions.length+'개 버전'):'')+'</span>'+st
+      +'<span style="color:#64748B;">마지막 저장 '+esc((V&&V.savedAt)||'—')+'</span>'
+      +'<span style="color:#B45309;">OS로 진행상황·결과 자동 전송: 미연결</span>'
+      +'<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">'
+      +(L.versions.length>1?'<select id="nfOsVerSel" style="font-size:12px;padding:3px 6px;">'+L.versions.map(function(v,i){ return '<option value="'+i+'"'+(i===L.cur?' selected':'')+'>범위 v'+(i+1)+' · '+esc(v.createdAt)+'</option>'; }).join('')+'</select>':'')
+      +'<button class="btn ghost sm" type="button" id="nfOsSave">작성본 저장</button>'
+      +'<button class="btn ghost sm" type="button" id="nfOsExport" title="OS applyAutomationResult 형식 결과 JSON (취합 담당자 전달용)">결과 JSON 내보내기</button>'
+      +'<button class="btn ghost sm" type="button" id="nfOsOff" title="연결만 해제 (작성본은 보관)">연결 해제</button></span>';
+    $i('nfOsSave').onclick=function(){ saveNow(true); };
+    $i('nfOsExport').onclick=exportResult;
+    $i('nfOsOff').onclick=function(){ saveNow(false); cur=null; window.__nfOsLink=null; banner(); try{ toast('OS 업무 연결을 해제했어요 (작성본은 보관됨)'); }catch(_){} };
+    var sel=$i('nfOsVerSel'); if(sel) sel.onchange=function(){ switchVer(+sel.value); };
+  }
+  function saveNow(msg){ if(!cur) return false; var a=readAll(), L=a[cur.workId]; if(!L) return false; var V=curVer(L); if(!V) return false;
+    var s=snap(); if(!s) return false; V.snapshot=s; V.savedAt=now(); V.total=(s.totals&&s.totals.total)||0;
+    var ok=writeAll(a); if(msg){ try{ toast(ok?'OS 업무 작성본을 저장했어요':'⚠️ 작성본 저장 실패 (브라우저 저장공간 부족일 수 있어요)'); }catch(_){} } banner(); return ok; }
+  function autosave(){ if(!cur) return; clearTimeout(saveT); saveT=setTimeout(function(){ saveNow(false); },1500); }
+  function switchVer(i){ saveNow(false); var a=readAll(), L=a[cur.workId]; if(!L||!L.versions[i]) return; L.cur=i; L.hist.push({at:now(),text:'범위 v'+(i+1)+' 작성본으로 전환'}); writeAll(a); loadVer(L.versions[i]); cur.status='open'; banner(); }
+  function loadVer(V){ if(V&&V.snapshot){ try{ restoreSnapshot(V.snapshot); }catch(e){ console.warn('[OS 연결] 복원 실패',e); } } }
+  function clearScreen(){ var oc=window.confirm; window.confirm=function(){ return true; }; try{ newEstimate(); }catch(e){ console.warn(e); } window.confirm=oc; }
+  function prefill(p){ var set=function(id,v){ var el=$i(id); if(el&&v!=null&&v!=='') el.value=v; };
+    set('client', (p.site&&p.site.name)||''); set('requester', p.partner||''); set('siteAddr', (p.site&&p.site.address)||'');
+    var sc=scopeText(p.scope); if(sc){ try{ projectAuto=false; }catch(_){} set('project', sc); }
+    var nt=[]; if(p.scope&&p.scope.notes) nt.push(String(p.scope.notes)); if(p.scope&&p.scope.common) nt.push('[OS 접수] '+p.scope.common); set('reviewAddNotes', nt.join('\n'));
+    if(p.due) set('reviewDue', String(p.due).slice(0,10));
+    try{ if(typeof recalc==='function') recalc(); }catch(_){} }
+
+  /* OS에서 업무 하나를 열 때 */
+  function openFromOS(p){
+    var bad=validate(p); if(bad){ showErr(bad); return {ok:false,reason:bad}; }
+    var a=readAll(), L=a[p.workId], sk=scopeKey(p), ts=now();
+    if(L && L.reqId!==p.reqId){ var m='업무번호 '+p.workId+'는 이미 다른 접수('+(L.reqNo||L.reqId)+')에 연결돼 있어요 — 섞이지 않게 열지 않았어요. OS 업무번호를 확인해 주세요.'; showErr(m); return {ok:false,reason:m}; }
+    /* 화면에 연결 안 된 작업이 있으면 비우기 전에 확인 */
+    var hasData=false; try{ hasData=(($i('client')||{}).value||'').trim()||(($i('project')||{}).value||'').trim()||buildings.some(function(b){ return categories.some(function(c){ return areaEff(b,c.id)>0; }); }); }catch(_){}
+    if(cur && cur.workId!==p.workId) saveNow(false);
+    if(!cur && hasData && !(L && false)){ if(!confirm('OS 업무('+(p.reqNo||p.reqId)+' · '+((p.site&&p.site.name)||'')+') 작성 화면을 엽니다.\n지금 화면의 입력 내용은 비워져요. (발행이력에 저장된 내역서는 그대로 남아요)\n계속할까요?')){ return {ok:false,reason:'사용자 취소'}; } }
+    var status;
+    if(!L){ L={ reqId:p.reqId, reqNo:p.reqNo||'', workId:p.workId, autoJobId:p.autoJobId||'', autoJobIdLocal:'POUR-'+p.workId, site:p.site||{}, partner:p.partner||'', createdAt:ts, versions:[], cur:0, hist:[], seq:0 };
+      clearScreen(); prefill(p);
+      L.versions.push({ scopeKey:sk, scopeVer:p.scopeVer||0, scope:p.scope||{}, createdAt:ts, savedAt:'', snapshot:null, issued:[] }); L.cur=0;
+      L.hist.push({at:ts,text:'새 초안 생성 · 범위 v1'}); status='new';
+    } else {
+      L.reqNo=p.reqNo||L.reqNo; L.site=p.site||L.site; L.partner=p.partner||L.partner; if(p.autoJobId) L.autoJobId=p.autoJobId;
+      var idx=-1; L.versions.forEach(function(v,i){ if(v.scopeKey===sk) idx=i; });
+      if(idx>=0){ L.cur=idx; loadVer(L.versions[idx]); L.hist.push({at:ts,text:'기존 작성본 이어 열기 · 범위 v'+(idx+1)}); status='open'; }
+      else { var prev=L.versions[L.versions.length-1]; loadVer(prev); var sc=scopeText(p.scope); if(sc){ try{ projectAuto=false; }catch(_){} var el=$i('project'); if(el) el.value=sc; }
+        L.versions.push({ scopeKey:sk, scopeVer:p.scopeVer||0, scope:p.scope||{}, createdAt:ts, savedAt:'', snapshot:null, issued:[], from:L.versions.length }); L.cur=L.versions.length-1;
+        L.hist.push({at:ts,text:'공사 범위 변경 수신 → 범위 v'+L.versions.length+' 새 작성본 (v'+(L.cur)+' 작성본은 그대로 보관)'}); status='scope';
+        try{ if(typeof recalc==='function') recalc(); }catch(_){} }
+    }
+    a[p.workId]=L; if(!writeAll(a)){ showErr('작성본 저장 공간이 부족해요 — 발행이력 정리 후 다시 열어 주세요'); return {ok:false,reason:'저장 실패'}; }
+    cur={workId:p.workId, status:status}; window.__nfOsLink=cur;
+    try{ goView('estimate'); }catch(_){}
+    saveNow(false); banner();
+    try{ toast(status==='new'?'OS 업무 새 초안을 만들었어요':(status==='scope'?'공사 범위가 바뀌어 새 버전 작성본을 만들었어요 (이전 버전 보관)':'OS 업무 작성본을 이어서 열었어요')); }catch(_){}
+    return {ok:true,status:status};
+  }
+  function showErr(m){ try{ goView('dash'); }catch(_){} try{ alert('OS 업무 연결 안 됨\n\n'+m); }catch(_){} }
+
+  /* 결과 내보내기 — OS 모델 applyAutomationResult(id, payload) 형식 */
+  function resultPayload(workId){ var L=readAll()[workId]; if(!L) return null; var V=curVer(L)||{}; L.seq=(L.seq||0)+1; var a=readAll(); a[workId].seq=L.seq; writeAll(a);
+    var iss=V.issued||[], last=iss[iss.length-1];
+    return { target:{ reqId:L.reqId, workId:L.workId }, payload:{ idemKey:'POUR|'+L.workId+'|v'+(L.cur+1)+'|'+(V.savedAt||'')+'|'+L.seq, autoJobId:(L.autoJobId||L.autoJobIdLocal), kind:last?'issued':'working', seq:L.seq,
+      version:last?{ ver:iss.length, at:last.at, file:last.file||'', total:last.total }:undefined,
+      files:last?undefined:[{ name:'작성 중 · 범위 v'+(L.cur+1)+' · 저장 '+(V.savedAt||'-'), at:V.savedAt||now(), kind:'작업 중', total:V.total||0 }] },
+      meta:{ app:'POUR 컨설팅내역서 자동화', scopeVer:L.cur+1, scopeVersions:L.versions.length, history:L.hist, note:'OS 전송 미연결 — 이 JSON을 취합 담당자가 OS_CONS_MODEL.applyAutomationResult(target.reqId, payload)에 넣어 확인' } }; }
+  function exportResult(){ if(!cur) return; saveNow(false); var r=resultPayload(cur.workId); if(!r) return;
+    var blob=new Blob([JSON.stringify(r,null,2)],{type:'application/json'}); var u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='OS결과_'+cur.workId+'_v'+r.meta.scopeVer+'.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(u); },1500); }
+
+  /* 기존 함수에 «저장만» 덧붙임 (원래 동작은 그대로 먼저 실행) */
+  try{ if(typeof window.recalc==='function'){ var _rc=window.recalc; window.recalc=function(){ var r=_rc.apply(this,arguments); autosave(); return r; }; } }catch(e){}
+  try{ if(typeof window.issueReport==='function'){ var _ir=window.issueReport; window.issueReport=function(){ var r=_ir.apply(this,arguments);
+      try{ if(cur){ var a=readAll(), L=a[cur.workId], V=curVer(L); if(V){ var d=window.__lastD||compute(); V.issued.push({at:now(), total:(d&&d.total)||0, file:(typeof buildEstimateFileName==='function'?buildEstimateFileName():'')}); L.hist.push({at:now(),text:'발행 · 범위 v'+(L.cur+1)+' · '+((d&&d.total)||0).toLocaleString('ko-KR')+'원'}); writeAll(a); saveNow(false); } } }catch(_){}
+      return r; }; } }catch(e){}
+
+  function fromHash(h0){ var h=(h0!=null?h0:location.hash)||''; if(h.indexOf('#os=')!==0) return false; var p=null;
+    try{ p=JSON.parse(b64urlDecode(h.slice(4))); }catch(e){ p=null; }
+    try{ history.replaceState(null,'',location.pathname+location.search+'#estimate'); }catch(_){}
+    if(!p){ showErr('OS에서 받은 업무 정보가 깨졌어요 — OS 수행 화면에서 다시 열어 주세요'); return true; }
+    openFromOS(p); return true; }
+  window.nfOsOpen=openFromOS; window.nfOsLinks=function(){ return readAll(); }; window.nfOsResult=resultPayload; window.nfOsCurrent=function(){ return cur; };
+  window.addEventListener('hashchange', function(){ fromHash(); });
+  function boot(){ setTimeout(function(){ var h=window.__nfBootHash||''; window.__nfBootHash=''; if(h.indexOf('#os=')===0) fromHash(h); else fromHash(); }, 400); }
+  if(document.readyState==='complete') boot(); else window.addEventListener('load', boot);
+})();
+</script><style id="nf-os-theme">
 /* ===== v8.8f: 서비스운영본부 OS 디자인 통일 (색·글꼴·테두리만 — 기능·화면 구조는 그대로) =====
    이 <style> 덩어리만 지우면 예전 모습으로 돌아갑니다. */
 :root{
