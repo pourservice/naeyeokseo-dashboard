@@ -5110,6 +5110,14 @@ function issueReport(){
 }
 function nfIssueLabel(m){ m=m||{}; return m.altNo?(m.altNo+'안 '+(m.altIssueNo||1)+'회차'):((m.issueNo||'-')+'회차'); }   /* v8.9: 안별 회차 표시 */
 window.nfIssueLabel=nfIssueLabel;
+/* v8.9: 발행이력에서 안 번호 직접 지정 — 같은 현장·같은 안끼리 발행 순서대로 회차 다시 매김 */
+function nfHistSetAlt(id,v){ const h=loadHistory(), t=h.find(x=>x.id===id); if(!t) return; const n=parseInt(v,10)||0;
+  if(n){ t.meta.altNo=n; t.meta.fnKind='안'; t.meta.fnNo=n; } else { delete t.meta.altNo; delete t.meta.altIssueNo; if(t.meta.fnKind==='안') t.meta.fnKind=''; }
+  const site=(t.meta.client||t.meta.site||'').trim(); const groups={};
+  h.filter(x=>(x.meta.client||x.meta.site||'').trim()===site && x.meta.altNo).sort((a,b)=>String(a.meta.issuedAt||'').localeCompare(String(b.meta.issuedAt||''))||((a.meta.issueNo||0)-(b.meta.issueNo||0)))
+   .forEach(x=>{ groups[x.meta.altNo]=(groups[x.meta.altNo]||0)+1; x.meta.altIssueNo=groups[x.meta.altNo]; });
+  saveHistory(h); renderHistory(); }
+window.nfHistSetAlt=nfHistSetAlt;
 function renderHistory(){
   let h=loadHistory(); const el=$('#histList'); if(!el)return;
   /* v8.7: 검색 + 정렬 — 현장별로 묶어 1회차→2회차… 순서대로 */
@@ -5125,7 +5133,7 @@ function renderHistory(){
   if(total && !h.length){ el.innerHTML='<div class="empty">‘'+((document.getElementById('histSearch')||{}).value||'')+'’ 검색 결과가 없어요.</div>'; return; }
   if(!h.length){ el.innerHTML='<div class="empty">아직 발행한 내역서가 없습니다. 견적 산출 화면에서 [발행 (이력 저장)]을 누르면 여기에 현장·회차별로 쌓입니다.</div>'; return; }
   el.innerHTML='<div style="overflow-x:auto;"><table><thead><tr><th class="t-left">현장명</th><th class="t-center">회차</th><th>발행일시</th><th class="t-num">총공사비</th><th>메모(수정사유)</th><th class="t-center">관리</th></tr></thead><tbody>'+
-    h.map(s=>`<tr><td class="t-left">${(s.meta.client||s.meta.site||'-')} <button class="btn xs ghost" title="현장명 바꾸기 (같은 이름 발행본 골라서)" onclick="nfHistRenameAsk('${String(s.meta.client||s.meta.site||'').replace(/'/g,"\\'")}',null,null,'${s.id}')" style="padding:0 5px;">✏</button></td><td class="t-center">${nfIssueLabel(s.meta)}</td><td>${fmtDate(s.meta.issuedAt)}</td><td class="t-num">${won((s.totals&&s.totals.total)||0)} 원</td><td><input type="text" value="${(s.meta.memo||'').replace(/"/g,'&quot;')}" placeholder="수정사유 등" oninput="updHistMemo('${s.id}',this.value)" style="min-width:150px;"></td><td class="t-center" style="white-space:nowrap;"><button class="btn xs" onclick="editFromHistory('${s.id}')">수정</button><button class="btn xs ghost" onclick="viewFromHistory('${s.id}')">보기</button><button class="btn xs ghost" onclick="exportSnapshotById('${s.id}')">.json</button><button class="btn xs ghost" onclick="deleteHistory('${s.id}')">삭제</button></td></tr>`).join('')+'</tbody></table></div>';
+    h.map(s=>`<tr><td class="t-left">${(s.meta.client||s.meta.site||'-')} <button class="btn xs ghost" title="현장명 바꾸기 (같은 이름 발행본 골라서)" onclick="nfHistRenameAsk('${String(s.meta.client||s.meta.site||'').replace(/'/g,"\\'")}',null,null,'${s.id}')" style="padding:0 5px;">✏</button></td><td class="t-center" style="white-space:nowrap;">${nfIssueLabel(s.meta)} <select title="몇 안인지 지정 (예전 발행본도 여기서 1안·2안으로 바꿀 수 있어요)" onchange="nfHistSetAlt('${s.id}',this.value)" style="font-size:11.5px;padding:1px 2px;border:1px solid #D8DEE6;border-radius:6px;color:#667085;width:auto;">${['',1,2,3,4,5,6].map(v=>'<option value="'+v+'"'+(String(s.meta.altNo||'')===String(v)?' selected':'')+'>'+(v?v+'안':'단독')+'</option>').join('')}</select></td><td>${fmtDate(s.meta.issuedAt)}</td><td class="t-num">${won((s.totals&&s.totals.total)||0)} 원</td><td><input type="text" value="${(s.meta.memo||'').replace(/"/g,'&quot;')}" placeholder="수정사유 등" oninput="updHistMemo('${s.id}',this.value)" style="min-width:150px;"></td><td class="t-center" style="white-space:nowrap;"><button class="btn xs" onclick="editFromHistory('${s.id}')">수정</button><button class="btn xs ghost" onclick="viewFromHistory('${s.id}')">보기</button><button class="btn xs ghost" onclick="exportSnapshotById('${s.id}')">.json</button><button class="btn xs ghost" onclick="deleteHistory('${s.id}')">삭제</button></td></tr>`).join('')+'</tbody></table></div>';
 }
 /* v8.7: 발행이력 현장명 바꾸기 — 검토방 카드 이름을 바꾸면 같이 묻고, 발행이력 ✏로도 바꿈. 같은 이름 다른 현장이 있으면 골라서 */
 function nfHistRename(ids, newName){ const h=loadHistory(); let n=0; h.forEach(s=>{ if(ids.indexOf(s.id)<0) return; s.meta.client=newName; s.meta.site=newName; if(s.state){ s.state.client=newName; } n++; }); if(n){ saveHistory(h); try{ renderHistory(); }catch(_){} try{ renderBanner(); }catch(_){} try{ if(typeof loadedReportId!=='undefined' && ids.indexOf(loadedReportId)>=0){ const c=document.getElementById('client'); if(c){ c.value=newName; } } }catch(_){} } return n; }
