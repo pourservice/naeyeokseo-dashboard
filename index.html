@@ -4815,8 +4815,12 @@ function showView(v){
   window.scrollTo(0,0);
 }
 /* URL 해시로 화면 바로 열기 — 예: …/#dash → 검토 대시보드로 바로 이동 */
-function nfHashView(){ var h=''; try{ h=decodeURIComponent((location.hash||'').replace(/^#/,'')).trim().toLowerCase(); }catch(e){} var map={dash:'dash',dashboard:'dash','검토':'dash','검토대시보드':'dash',home:'home','홈':'home',estimate:'estimate','내역서':'estimate',cross:'cross','물량검증':'cross',master:'master',history:'history',final:'final'}; return map[h]||null; }
-window.addEventListener('hashchange', function(){ var v=nfHashView(); if(v){ try{ showView(v); }catch(e){} } });
+function nfHashView(){ var h=''; try{ h=decodeURIComponent((location.hash||'').replace(/^#/,'')).trim().toLowerCase(); }catch(e){} var map={dash:'dash',dashboard:'dash','검토':'dash','검토대시보드':'dash',home:'home','홈':'home',estimate:'estimate','내역서':'estimate',cross:'cross','물량검증':'cross',master:'master',history:'history',final:'final'}; if(/^card=/.test(h)) return 'dash'; return map[h]||null; }
+/* v8.9: …/#card=<카드id> → 검토 대시보드에서 그 카드 상세 바로 열기 (OS 처리·진행 현황에서 클릭) */
+function nfHashCard(h){ var m=String(h||'').match(/^#card=([^&#]+)/); try{ return m?decodeURIComponent(m[1]):''; }catch(e){ return ''; } }
+function nfOpenCardById(id){ if(!id) return; var t0=Date.now(); (function tick(){ try{ if(window.NF_DASH&&NF_DASH.allCards().some(function(x){ return String(x.id)===String(id); })){ try{ showView('dash'); }catch(_){} if(NF_DASH.openCard(id)) return; } }catch(e){}
+  if(Date.now()-t0<20000) setTimeout(tick,400); else { try{ toast('해당 카드를 찾지 못했어요 — 팀 공유 연결을 확인해 주세요'); }catch(_){} } })(); }
+window.addEventListener('hashchange', function(){ var cid=nfHashCard(location.hash); var v=nfHashView(); if(v){ try{ showView(v); }catch(e){} } if(cid) nfOpenCardById(cid); });
 /* ============================================================
    v6.9 앱 셸 헬퍼 (홈·사이드바·톱바) — 기존 로직 미변경
    ============================================================ */
@@ -4980,7 +4984,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   /* ── v6.9: 최초 진입 화면을 홈으로 + 톱바 날짜 ── */
   try{ var _n=new Date(),_p=function(x){return String(x).padStart(2,'0');},_w=['일','월','화','수','목','금','토'][_n.getDay()];
        var _td=document.getElementById('tbDate'); if(_td) _td.textContent=_n.getFullYear()+'.'+_p(_n.getMonth()+1)+'.'+_p(_n.getDate())+' ('+_w+')'; }catch(e){}
-  try{ var _hv=nfHashView(); showView(_hv||'home'); }catch(e){ console.error('home init',e); }
+  try{ var _cid=nfHashCard(location.hash||window.__nfBootHash||''); var _hv=nfHashView(); showView(_hv||'home'); if(_cid) nfOpenCardById(_cid); }catch(e){ console.error('home init',e); }
   try{ document.documentElement.classList.remove('nf-boot'); }catch(e){}   /* v8.9: 첫 화면이 정해진 뒤에 보이기 */
 });
 /* ===== 발행이력 / 스냅샷 (Firebase 이전용 v1 스키마) ===== */
@@ -8588,6 +8592,7 @@ window.NF_DASH = {
   team: function(){ try{ return TEAM.slice(); }catch(e){ return []; } },
   allCards: function(){ try{ return reviews.map(r=>({id:r.id, site:r.site, status:r.status, stage:((STAGES.find(s=>s.key===r.status)||{}).label||''), nX:(r.comments||[]).reduce((s,c)=>s+(c.links||[]).filter(nfIsXls).length,0)})); }catch(e){ return []; } },
   lastAuthor: function(){ try{ return lastAuthor||''; }catch(e){ return ''; } },
+  openCard: function(id){ try{ const r=reviews.find(x=>x&&String(x.id)===String(id)); if(!r) return false; openDetail(r); return true; }catch(e){ return false; } },   /* v8.9: #card=<id> 바로 열기 */
   addRevision: async function(o){
     const r=reviews.find(x=>x.id===o.id); if(!r){ toast('카드를 찾을 수 없어요'); return false; }
     r.comments=r.comments||[];
