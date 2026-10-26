@@ -1590,7 +1590,8 @@ function catIdOfWork(w){ const c=categories.find(x=>x.mode==='recipe'&&x.work===
 function wallCoef(){ return (AREA_FORMULA.wall && num(AREA_FORMULA.wall.perim))||0; }   /* 벽체 높이(m) */
 /* 자동 둘레 : 이 동의 슬라브·배수로 둘레(자동으로 읽힌 값) 중 가장 큰 값 */
 /* v8.9: 벽체도포 옥상·옥탑 따로 — 옥상(본체)·옥탑 각각 체크 + 높이. 기본 = 옥상만 (현장별 저장) */
-let wallParts={roof:true, top:false, topH:null};
+let wallParts={mode:'auto', topH:null};   /* mode: auto=기존 방식(옥상·옥탑 중 큰 둘레 × 높이, 예전과 똑같음) · roof=옥상만 · top=옥탑만 · both=옥상+옥탑 따로 */
+function wallMode(){ const w=wallParts||{}; if(w.mode) return w.mode; return 'auto'; }   /* 예전 저장본·모드 없는 값 = 기존 방식 */
 function wallTopH(){ return (wallParts&&wallParts.topH!=null&&wallParts.topH!=='')?num(wallParts.topH):wallCoef(); }
 function wallMaxL(b,key){ if(!b) return 0; let L=0;
   (categories||[]).forEach(c=>{ if(c && c.mode==='recipe' && (c.work==='dual'||c.work==='drain')){ const d=(b[key]&&b[key][c.id])||null; if(d){ const v=evalExpr(d.L); if(v>L) L=v; } } });
@@ -1600,18 +1601,23 @@ function wallTopPerim(b){ return wallMaxL(b,'roofDims'); }     /* 옥탑 슬라�
 /* 한 동의 옥상 벽체 둘레 = 동별 '벽체둘레' 직접 입력값이 있으면 그 값(덮어쓰기), 없으면 자동 둘레 */
 function wallPerimOf(b){ if(!b) return 0; const m=evalExpr(b.wallL); if(m>0) return m; return wallAutoPerim(b); }
 /* 한 동 벽체도포 = (옥상 둘레 × 옥상 높이) + (옥탑 둘레 × 옥탑 높이) — 체크한 것만 */
-function wallOfB(b){ const wp=wallParts||{roof:true}, H=wallCoef(), Ht=wallTopH(); let v=0; const f=[], t=[];
-  if(wp.roof!==false){ const per=wallPerimOf(b); if(per>0&&H>0){ v+=per*H; f.push('('+_numStr(per)+'*'+_numStr(H)+')'); } t.push('옥상 둘레 '+(evalExpr(b&&b.wallL)>0?'수동':'자동')+' × '+H+'m'); }
-  if(wp.top){ const per=wallTopPerim(b); if(per>0&&Ht>0){ v+=per*Ht; f.push('('+_numStr(per)+'*'+_numStr(Ht)+')'); } t.push('옥탑 둘레 × '+Ht+'m'); }
+function wallOfB(b){ const md=wallMode(), H=wallCoef(), Ht=wallTopH(); let v=0; const f=[], t=[]; const man=evalExpr(b&&b.wallL)>0;
+  if(md==='auto'){ const per=man?evalExpr(b.wallL):Math.max(wallAutoPerim(b),wallTopPerim(b)); if(per>0&&H>0){ v+=per*H; f.push('('+_numStr(per)+'*'+_numStr(H)+')'); } t.push('둘레 '+(man?'수동':'자동')+' × '+H+'m'); }   /* 기존 방식 그대로 */
+  if(md==='roof'||md==='both'){ const per=wallPerimOf(b); if(per>0&&H>0){ v+=per*H; f.push('('+_numStr(per)+'*'+_numStr(H)+')'); } t.push('옥상 둘레 '+(man?'수동':'자동')+' × '+H+'m'); }
+  if(md==='top'||md==='both'){ const per=wallTopPerim(b); if(per>0&&Ht>0){ v+=per*Ht; f.push('('+_numStr(per)+'*'+_numStr(Ht)+')'); } t.push('옥탑 둘레 × '+Ht+'m'); }
   return { v:v, f:(f.length?f.join('+'):null), txt:t.join(' + ') }; }
 function wallAreaTotal(){
   if(!wallInclude) return 0;
   let a=0; expandedBuildings().forEach(b=>{ a+=wallOfB(b).v; }); return a;
 }
-function setWallPart(k,on){ wallParts=Object.assign({roof:true,top:false,topH:null}, wallParts||{}); wallParts[k]=!!on;
+function setWallMode(m){ wallParts=Object.assign({mode:'auto',topH:null}, wallParts||{}); wallParts.mode=m||'auto';
   const i=extras.findIndex(e=>e.n==='벽체도포'); if(i>=0){ extras[i].manualQ=false; if(!wallAreaTotal()) extras[i].q=0; }
   renderAreaCoeff(); renderBuildings(); renderExtras(); recalc(); }
-function updWallTopH(v){ wallParts=Object.assign({roof:true,top:false,topH:null}, wallParts||{}); wallParts.topH=num(v);
+window.setWallMode=setWallMode;
+function setWallPart(k,on){ wallParts=Object.assign({mode:'auto',topH:null}, wallParts||{});
+  const i=extras.findIndex(e=>e.n==='벽체도포'); if(i>=0){ extras[i].manualQ=false; if(!wallAreaTotal()) extras[i].q=0; }
+  renderAreaCoeff(); renderBuildings(); renderExtras(); recalc(); }
+function updWallTopH(v){ wallParts=Object.assign({mode:'auto',topH:null}, wallParts||{}); wallParts.topH=num(v);
   const i=extras.findIndex(e=>e.n==='벽체도포'); if(i>=0) extras[i].manualQ=false;
   renderAreaCoeff(); renderBuildings(); renderExtras(); recalc(); }
 window.setWallPart=setWallPart; window.updWallTopH=updWallTopH;
@@ -2288,9 +2294,10 @@ function renderAreaCoeff(){
         ? `<div class="ac-item ac-wall" style="grid-column:1/-1;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">`
           +`<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-weight:700;white-space:nowrap;"><input type="checkbox" ${wallInclude?'checked':''} onchange="setWallInclude(this.checked)"> 벽체도포 포함</label>`
           +(wallInclude
-            ? `<label style="display:flex;align-items:center;gap:6px;white-space:nowrap;"><input type="checkbox" ${(wallParts.roof!==false)?'checked':''} onchange="setWallPart('roof',this.checked)"> 옥상 · 높이(m) <input type="number" step="0.01" class="num" style="width:72px;" value="${wallCoef()}" onchange="updWallCoef(this.value)" title="1.5처럼 소수도 입력 가능 — 입력 후 다른 곳을 누르거나 Enter"></label>`
-              +`<label style="display:flex;align-items:center;gap:6px;white-space:nowrap;"><input type="checkbox" ${wallParts.top?'checked':''} onchange="setWallPart('top',this.checked)"> 옥탑 · 높이(m) <input type="number" step="0.01" class="num" style="width:72px;" value="${wallTopH()}" onchange="updWallTopH(this.value)" ${wallParts.top?'':'disabled'} title="옥탑 슬라브·배수로 둘레 × 이 높이"></label>`
-              +`<span style="color:var(--text-sub,#768194);font-size:12px;">→ <b style="color:var(--ink,#1c2431);">${won2(wallAreaTotal())} ㎡</b> 자동 반영 · 옥상은 동 '벽체둘레'에 값 넣으면 그 값 우선${wallParts.top?' · 옥탑은 동별 옥탑 둘레 사용':''}</span>`
+            ? `<label style="display:flex;align-items:center;gap:6px;white-space:nowrap;">범위 <select onchange="setWallMode(this.value)" style="padding:3px 6px;">${[['auto','기존대로 (옥상·옥탑 중 큰 둘레)'],['roof','옥상만'],['top','옥탑만'],['both','옥상 + 옥탑 따로']].map(o=>`<option value="${o[0]}"${wallMode()===o[0]?' selected':''}>${o[1]}</option>`).join('')}</select></label>`
+              +(wallMode()!=='top'?`<label style="display:flex;align-items:center;gap:6px;white-space:nowrap;">${wallMode()==='both'?'옥상 ':''}벽체 높이(m) <input type="number" step="0.01" class="num" style="width:72px;" value="${wallCoef()}" onchange="updWallCoef(this.value)" title="1.5처럼 소수도 입력 가능 — 입력 후 다른 곳을 누르거나 Enter"></label>`:'')
+              +((wallMode()==='top'||wallMode()==='both')?`<label style="display:flex;align-items:center;gap:6px;white-space:nowrap;">옥탑 높이(m) <input type="number" step="0.01" class="num" style="width:72px;" value="${wallTopH()}" onchange="updWallTopH(this.value)" title="옥탑 슬라브·배수로 둘레 × 이 높이"></label>`:'')
+              +`<span style="color:var(--text-sub,#768194);font-size:12px;">→ <b style="color:var(--ink,#1c2431);">${won2(wallAreaTotal())} ㎡</b> 자동 반영 · 동 '벽체둘레'에 값 넣으면 그 값 우선</span>`
             : `<span style="color:var(--ink-faint,#9BA4B5);font-size:12px;">체크하면 슬라브·배수로 둘레 × 높이로 자동 산출됩니다.</span>`)
           +`</div>`
         : '')
@@ -5026,7 +5033,7 @@ function restoreSnapshot(s){
   if($('#client'))$('#client').value=st.client||''; if($('#project'))$('#project').value=st.project||''; if($('#requester'))$('#requester').value=st.requester||''; if($('#special'))$('#special').value=st.special||''; if($('#siteAddr'))$('#siteAddr').value=st.siteAddr||''; if($('#totalDong'))$('#totalDong').value=st.totalDong||'';
   buildings=cloneJ(st.buildings||[]); categories=cloneJ(st.categories||[]); extras=cloneJ(st.extras||[]); activeWorks=cloneJ(st.activeWorks||[]); pcReasons=cloneJ(st.pcReasons||{}); projectAuto=(st.projectAuto!==undefined?st.projectAuto:true);
   wallInclude=(st.wallInclude!=null)?!!st.wallInclude:extras.some(e=>e&&e.n==='벽체도포'&&num(e.q)>0);
-  try{ wallParts=st.wallParts?Object.assign({roof:true,top:false,topH:null},st.wallParts):{roof:true,top:false,topH:null}; }catch(_){}   /* 예전 저장본: 벽체도포 물량 있으면 포함 상태로 */
+  try{ wallParts=(st.wallParts&&st.wallParts.mode)?Object.assign({mode:'auto',topH:null},st.wallParts):{mode:'auto',topH:(st.wallParts&&st.wallParts.topH)||null}; }catch(_){}   /* 모드 없는 저장본 = 기존 방식 */   /* 예전 저장본: 벽체도포 물량 있으면 포함 상태로 */
   Object.keys(TARGETS).forEach(k=>delete TARGETS[k]); Object.assign(TARGETS, st.TARGETS||{});
   materialMult=(st.materialMult!=null)?st.materialMult:1;
   if(st.cross){ Object.keys(crossState).forEach(k=>{ if(st.cross[k]!==undefined) crossState[k]=cloneJ(st.cross[k]); }); }
@@ -5077,7 +5084,7 @@ function newEstimate(){
   categories=cloneJ(NF_DEFAULT_STATE.categories);
   extras=cloneJ(NF_DEFAULT_STATE.extras);
   activeWorks=[]; pcReasons={}; projectAuto=true; materialMult=1;
-  try{ wallInclude=false; wallParts={roof:true,top:false,topH:null}; }catch(e){}
+  try{ wallInclude=false; wallParts={mode:'auto',topH:null}; }catch(e){}
   try{ priceKind='base'; }catch(e){}
   try{ pcChecksByType={}; }catch(e){}
   try{ pcCustom={}; }catch(e){}
