@@ -2277,7 +2277,7 @@ function renderAreaCoeff(){
         ? `<div class="ac-item ac-wall" style="grid-column:1/-1;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">`
           +`<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-weight:700;white-space:nowrap;"><input type="checkbox" ${wallInclude?'checked':''} onchange="setWallInclude(this.checked)"> 벽체도포 포함</label>`
           +(wallInclude
-            ? `<label style="display:flex;align-items:center;gap:6px;white-space:nowrap;">벽체 높이(m) <input type="number" step="0.01" class="num" style="width:72px;" value="${wallCoef()}" oninput="updWallCoef(this.value)"></label>`
+            ? `<label style="display:flex;align-items:center;gap:6px;white-space:nowrap;">벽체 높이(m) <input type="number" step="0.01" class="num" style="width:72px;" value="${wallCoef()}" onchange="updWallCoef(this.value)" title="1.5처럼 소수도 입력 가능 — 입력 후 다른 곳을 누르거나 Enter"></label>`
               +`<span style="color:var(--text-sub,#768194);font-size:12px;">= 둘레(자동) × ${wallCoef()}m → <b style="color:var(--ink,#1c2431);">${won2(wallAreaTotal())} ㎡</b> 자동 반영 · 동 '벽체둘레'에 값 넣으면 그 값 우선</span>`
             : `<span style="color:var(--ink-faint,#9BA4B5);font-size:12px;">체크하면 슬라브·배수로 둘레 × 높이로 자동 산출됩니다.</span>`)
           +`</div>`
