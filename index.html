@@ -4151,7 +4151,7 @@ function estAutoMap(){
 }
 function estColOpts(fam){
   if(fam==='red') return [['shingle|body','싱글 본체(옥상)'],['metal|body','금속기와 본체(옥상)'],['','사용안함']];
-  if(fam==='green') return [['shingle|roof','싱글 옥탑'],['metal|roof','금속기와 옥탑'],['dual|roof','슬라브 옥탑'],['','사용안함']];
+  if(fam==='green') return [['shingle|roof','싱글 옥탑'],['metal|roof','금속기와 옥탑'],['dual|roof','슬라브 옥탑'],['metalpaint|body','박공지붕(도장)'],['','사용안함']];   /* v8.9: 녹색이 박공지붕일 때 선택 */
   return [['dual|body','슬라브 본체'],['drain|body','배수로'],['pvc|body','PVC 본체'],['','사용안함']];
 }
 function estMapVal(fam){ var t=estMap[fam]; return t?(t.work+'|'+(t.roof?'roof':'body')):''; }
@@ -8861,6 +8861,8 @@ function pvFmt(cell){
   if(v===null||v===undefined||v==='') return '';
   if(typeof v==='number'){
     var nf=cell.numFmt||'';
+    /* v8.9: '"싱글 ("General"%)"' 처럼 글자+숫자 형식(할증 % 칸)은 엑셀과 똑같이 '싱글 (15%)'로 — 미리보기만의 표시 오류 수정 */
+    if(/General/.test(nf) && /"/.test(nf)){ return nf.replace(/"([^"]*)"|General/g,function(m,lit){ return lit!==undefined?lit:v.toLocaleString('ko-KR',{maximumFractionDigits:6}); }); }
     if(nf.indexOf('%')>=0){ var pd=((nf.split('.')[1]||'').match(/[0#]/g)||[]).length; return (v*100).toFixed(pd)+'%'; }
     var dm=((nf.split('.')[1]||'').match(/[0#]/g)||[]).length;
     return v.toLocaleString('ko-KR',{minimumFractionDigits:0, maximumFractionDigits:dm||0});
