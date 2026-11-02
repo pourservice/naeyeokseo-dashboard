@@ -6496,6 +6496,9 @@ const nfCloud={
     const out=JSON.parse(JSON.stringify(rv));
     for(const r of out){ for(const c of (r.comments||[])){ for(const l of (c.links||[])){
       if(l && typeof l.url==='string' && l.url.indexOf('data:')===0){
+        /* v8.9: 1순위 구글 드라이브(중계 서버, 로그인 불필요·무료 15GB·기한 없음) — 실패하거나 22MB 넘으면 예전처럼 Realtime DB */
+        try{ if(typeof nfRelayUrl==='function' && nfRelayUrl()){ const du=l.url, cm=du.indexOf(','), mime=du.slice(5,cm).replace(/;base64$/,''); const bin=atob(du.slice(cm+1)); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+            if(u8.length<=NF_RELAY_MAX){ const f=new File([u8], l.name||'file', {type:mime||'application/octet-stream'}); const gu=await nfRelayUpload(f, r.id); if(gu){ l.url=gu; if(!l.size) l.size=u8.length; continue; } } } }catch(e){ console.warn('[offload→drive 실패, Realtime DB로]',e); }
         if(this.rtdb){
           try{ l.url=await this._rtdbUploadDataUrl(l.url, l.name||'file', (r.id||'r')+'_'+(c.id||'c')); }
           catch(e){ console.error('[nfCloud] rtdb offload',e); l.localOnly=true; /* URL 보존: 최소한 올린 PC에서는 보임 */ }
