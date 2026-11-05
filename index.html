@@ -1502,11 +1502,30 @@ function getRecipes(){
   const war = (typeof currentPriceKind==='function') && currentPriceKind()==='war';
   const R = {};
   Object.keys(RECIPES_META).forEach(k=>{
-    R[k] = {key:k, ...RECIPES_META[k], materials: materialsDB.filter(m=>m.work===k)
+    R[k] = {key:k, ...RECIPES_META[k], ...nfWorkNameOf(k), materials: materialsDB.filter(m=>m.work===k)
       .map(m=>({n:m.n,s:m.s,u:m.u,coeff:m.coeff,price:(war && m.priceWar!=null)?m.priceWar:m.price}))};
   });
   return R;
 }
+/* v9.1: 이 현장만 공종 이름 바꾸기·순서 바꾸기 (면적 계산식 카드의 ✏️ · ◀ ▶) — 비어 있으면 예전과 똑같음 */
+let WORK_NAME_OVR = {};      /* WORK_NAME_OVR[work] = {label:'칸 이름', name:'엑셀 공종 이름', spec:'규격'} */
+let WORK_ORDER_OVR = null;   /* ['dual','metal',...] — 엑셀 일위대가·산출내역서·집계표 공종 순서 */
+function nfWorkNameOf(k){ const o=(WORK_NAME_OVR||{})[k]; if(!o) return {}; const r={}; if(o.name) r.name=o.name; if(o.spec!=null&&o.spec!=='') r.spec=o.spec; return r; }
+function nfWorkRename(cid){ const c=categories.find(x=>x.id===cid); if(!c||!c.work) return; const k=c.work, M=RECIPES_META[k]||{}, o=WORK_NAME_OVR[k]||{};
+  const lb=prompt('① 칸 이름 (동별 입력·물량산출내역서에 보이는 이름)', c.label); if(lb===null) return;
+  const nm=prompt('② 엑셀 공종 이름 (일위대가표·산출내역서·집계표 제목, 번호는 자동)', String(o.name||M.name||'').replace(/^\s*[0-9]+(-[0-9]+)?\.\s*/,'')); if(nm===null) return;
+  const sp=prompt('③ 규격 (공종 이름 옆 칸)', (o.spec!=null&&o.spec!=='')?o.spec:(M.spec||'')); if(sp===null) return;
+  c.label=lb.trim()||c.label;
+  const def=String(M.name||'').replace(/^\s*[0-9]+(-[0-9]+)?\.\s*/,'');
+  const n={label:c.label}; if(nm.trim() && nm.trim()!==def) n.name='1. '+nm.trim(); if(sp.trim() && sp.trim()!==M.spec) n.spec=sp.trim();
+  WORK_NAME_OVR[k]=n; projectAuto && applyAutoProject();
+  renderAreaCoeff(); renderCategories(); renderBuildings(); recalc(); }
+function nfWorkMove(cid,dir){ const vis=categories.filter(c=>hasAreaFormula(c) && (typeof visCats!=='function' || visCats().includes(c)));
+  const i=vis.findIndex(c=>c.id===cid), j=i+dir; if(i<0||j<0||j>=vis.length) return;
+  const a=categories.indexOf(vis[i]), b=categories.indexOf(vis[j]); const t=categories[a]; categories[a]=categories[b]; categories[b]=t;
+  WORK_ORDER_OVR=[]; categories.forEach(c=>{ if(c.mode==='recipe'&&c.work&&WORK_ORDER_OVR.indexOf(c.work)<0) WORK_ORDER_OVR.push(c.work); });
+  renderAreaCoeff(); renderCategories(); renderBuildings(); recalc(); }
+window.nfWorkRename=nfWorkRename; window.nfWorkMove=nfWorkMove;
 /* 공법별 인부 단가 — 현재 단가기준(내부/협력사)에 맞춰 특별·보통인부 단가를 돌려줌.
    공법별 값(LABOR_WORK)이 없으면 전역 LABOR 사용, 협력사 값이 없으면 내부값을 그대로 사용 */
 function laborFor(work){
@@ -1742,7 +1761,8 @@ function syncPrep(){
 const won = n => Math.round(n).toLocaleString('ko-KR');
 const won2 = n => (Math.round(n*100)/100).toLocaleString('ko-KR');
 const ceilUp = n => Math.ceil(Math.round(num(n)*10000)/10000);   /* 소수점 올림(엑셀 ROUNDUP) — 부동소수 오차 방지 */
-const wonUp = n => ceilUp(n).toLocaleString('ko-KR');
+const roundQ = n => Math.round(Math.round(num(n)*10000)/10000);   /* v9.0: 물량 반올림(엑셀 ROUND) — 0.5 이상 올림, 0.5 미만 버림 */
+const wonUp = n => roundQ(n).toLocaleString('ko-KR');
 const qf = n => (Math.round(n*100000)/100000).toLocaleString('ko-KR',{maximumFractionDigits:5});
 const $ = s => document.querySelector(s);
 const num = v => { const x=parseFloat(v); return isNaN(x)?0:x; };
@@ -1892,11 +1912,11 @@ function quantities(){
     const dz=(c.mode==='recipe'&&c.work&&activeWorks.includes(c.work)&&DORMER_WORKS.includes(c.work));   /* v8.7: 뻐꾸기창은 그 동 옥상 면적에 더해서 할증(싱글 15% 등)까지 같이 적용 */
     const ax=(c.mode==='unit')||(c.mode==='recipe'&&c.work&&activeWorks.includes(c.work));   /* v8.8: 추가 물량(캐노피 등)도 옥상 물량에 더함 */
     const baseSum=EB.reduce((s,b)=>s+area(b,c.id)+(dz?dormerAreaB(b,c.id):0)+(ax?addQAreaB(b,c.id):0),0), roofSum=EB.reduce((s,b)=>s+roofArea(b,c.id),0);
-    const baseRaw=ceilUp(baseSum);      // 옥상(본체) 합계 (+뻐꾸기창)
-    const roofRaw=ceilUp(roofSum);  // 옥탑 합계
+    const baseRaw=roundQ(baseSum);      // 옥상(본체) 합계 (+뻐꾸기창)
+    const roofRaw=roundQ(roofSum);  // 옥탑 합계
     /* v8.7: 할증 후 = 동별 할증 물량을 모두 더한 뒤 올림 (엑셀 '할증 후 물량' 표의 동별 칸 합계와 똑같이) */
-    const baseQty=ceilUp(baseSum*(1+sur/100));
-    const roofQty=ceilUp(roofSum*(1+sur/100));
+    const baseQty=roundQ(baseSum*(1+sur/100));
+    const roofQty=roundQ(roofSum*(1+sur/100));
     const raw=baseRaw+roofRaw, qty=baseQty+roofQty;
     cat[c.id]={raw,qty,sur,baseRaw,roofRaw,baseQty,roofQty};
   });
@@ -1912,8 +1932,10 @@ function compute(){
   const works=Object.keys(RECIPES_META).map(key=>{
     const lg=ledgers[key], qty=q.work[key]||0;
     const items=lg.rows.map(r=>({n:r.n,s:r.s,cat:r.cat,unit:r.amount,qty,amount:r.amount*qty}));
-    return {key,name:RECIPES_META[key].name,spec:RECIPES_META[key].spec,qty,items,mat:lg.matUnit*qty,lab:lg.labUnit*qty,exp:lg.expUnit*qty,sum:lg.unitTotal*qty,warn:lg.warn};
+    const _no=(WORK_NAME_OVR||{})[key];
+    return {key,name:RC[key].name,spec:RC[key].spec,lbl:(_no&&_no.label)||undefined,qty,items,mat:lg.matUnit*qty,lab:lg.labUnit*qty,exp:lg.expUnit*qty,sum:lg.unitTotal*qty,warn:lg.warn};
   });
+  if(Array.isArray(WORK_ORDER_OVR)&&WORK_ORDER_OVR.length){ const oi=k=>{ const x=WORK_ORDER_OVR.indexOf(k); return x<0?99:x; }; works.sort((A,B)=>oi(A.key)-oi(B.key)); }   /* v9.1: 순서 바꾼 현장만 */
   /* ㎡당 직접단가 항목 (벽체도포 · 부대시설 등) → 도장·부대공사 */
   const unitItems=categories.filter(c=>c.mode==='unit').map(c=>{
     const qd=q.cat[c.id], qty=qd.qty, amt=qty*num(c.price);
@@ -2298,7 +2320,7 @@ function renderAreaCoeff(){
     +`<button class="btn xs ghost" onclick="resetAreaCoeff()" style="margin-left:auto;">기본값 복원</button></div>`
     +`<div class="ac-grid">`
     + cols.map(c=>{ const f=AREA_FORMULA[c.work]; if(c.work==='drain'){ f.mult=1; if(f.roofMult!=null) f.roofMult=1; } const on5=Math.abs(num(f.mult)-1.05)<0.001; const roofOnW=(f.roof!==false); const on5r=Math.abs(num(f.roofMult!=null?f.roofMult:f.mult)-1.05)<0.001; return `<div class="ac-item">`
-        +`<div class="ac-name">${c.label}</div>`
+        +`<div class="ac-name" style="display:flex;align-items:center;gap:4px;">${c.label}<span style="margin-left:auto;display:inline-flex;gap:3px;"><button class="btn xs ghost" style="padding:1px 6px;" title="이름 바꾸기 (이 현장만)" onclick="nfWorkRename('${c.id}')">✏️</button><button class="btn xs ghost" style="padding:1px 6px;" title="앞으로 (엑셀 공종 순서도 같이)" onclick="nfWorkMove('${c.id}',-1)">◀</button><button class="btn xs ghost" style="padding:1px 6px;" title="뒤로 (엑셀 공종 순서도 같이)" onclick="nfWorkMove('${c.id}',1)">▶</button></span></div>`
         +`<label class="ac-f">둘레계수 <input type="number" step="0.01" class="num" value="${f.perim}" oninput="updCoeff('${c.work}','perim',this.value)"></label>`
         +(roofOnW?`<label class="ac-f">옥탑 둘레계수 <input type="number" step="0.01" class="num" value="${f.roofPerim!=null?f.roofPerim:f.perim}" oninput="updRoofCoeff('${c.work}',this.value)"></label>`:'')
         +(c.work==='drain'?`<div class="ac-hint" style="font-size:11px;color:var(--text-sub);margin:2px 0;">배수로는 5% 할증 없음</div>`:`<label class="ac-chk"><input type="checkbox" ${on5?'checked':''} onchange="setPct5('${c.work}',this.checked)"> 옥상 5% 할증 <span class="ac-hint">(중심선)</span></label>`)
@@ -2775,7 +2797,8 @@ function autoProjectName(){
   const ORDER=['shingle','metal','dual','drain','pvc','metalpaint'];
   const keys=ORDER.filter(k=>categories.some(c=>c.mode==='recipe'&&c.work===k&&buildings.some(b=>areaEff(b,c.id)>0)));
   if(!keys.length) return '';
-  return '옥상 '+keys.map(k=>WT[k]).join(' 및 ')+' 방수공사';   /* 공종별 자동: 예) 옥상 금속기와 및 배수로 방수공사 */
+  const ko=(Array.isArray(WORK_ORDER_OVR)&&WORK_ORDER_OVR.length)?keys.slice().sort((a,b)=>{ const x=WORK_ORDER_OVR.indexOf(a), y=WORK_ORDER_OVR.indexOf(b); return (x<0?99:x)-(y<0?99:y); }):keys;
+  return '옥상 '+ko.map(k=>((WORK_NAME_OVR||{})[k]&&WORK_NAME_OVR[k].label)||WT[k]).filter((v,i,a)=>a.indexOf(v)===i).join(' 및 ')+' 방수공사';   /* 공종별 자동: 예) 옥상 금속기와 및 배수로 방수공사 */
 }
 function applyAutoProject(){ if(!projectAuto) return; const nm=autoProjectName(); if(nm && $('#project')) $('#project').value=nm; }
 function projectManual(){ projectAuto=false; }
@@ -5039,7 +5062,7 @@ function buildSnapshot(){
       buildings:cloneJ(buildings), categories:cloneJ(categories), extras:cloneJ(extras),
       activeWorks:cloneJ(activeWorks), TARGETS:cloneJ(TARGETS), pcReasons:cloneJ(pcReasons), projectAuto:projectAuto, materialMult:materialMult,
       pcChecksByType:cloneJ(pcChecksByType), pcCustom:(typeof pcCustom!=='undefined'?cloneJ(pcCustom):{}), pcManualPrice:(typeof pcManualPrice!=='undefined'?cloneJ(pcManualPrice):{}), paintCoat:(typeof paintCoat!=='undefined'?paintCoat:1), priceKind:(typeof priceKind!=='undefined'?priceKind:'base'), areaFormula:(typeof AREA_FORMULA!=='undefined'?cloneJ(AREA_FORMULA):null), wallInclude:(typeof wallInclude!=='undefined'?!!wallInclude:false), wallParts:cloneJ(wallParts), notices:(typeof selectedNotices!=='undefined'?cloneJ(selectedNotices):[]),
-      materialsDB:cloneJ(materialsDB), LABOR:cloneJ(LABOR), LABOR_WORK:(typeof LABOR_WORK!=='undefined'?cloneJ(LABOR_WORK):{}), LEDGER_TGT:(typeof LEDGER_TGT!=='undefined'?cloneJ(LEDGER_TGT):{}), EXP_RATE:(typeof EXP_RATE!=='undefined'?cloneJ(EXP_RATE):{}),
+      workNameOvr:cloneJ(WORK_NAME_OVR||{}), workOrderOvr:(Array.isArray(WORK_ORDER_OVR)?WORK_ORDER_OVR.slice():null), materialsDB:cloneJ(materialsDB), LABOR:cloneJ(LABOR), LABOR_WORK:(typeof LABOR_WORK!=='undefined'?cloneJ(LABOR_WORK):{}), LEDGER_TGT:(typeof LEDGER_TGT!=='undefined'?cloneJ(LEDGER_TGT):{}), EXP_RATE:(typeof EXP_RATE!=='undefined'?cloneJ(EXP_RATE):{}),
       cross:(function(){ const c=cloneJ(crossState); delete c.sat; delete c.satOcr; delete c.satShareUrls; return c; })(),   /* 위성사진(base64)·OCR·공유URL은 스냅샷·팀동기화에서 제외 — 용량/Firestore 1MB 초과 방지 */
       ui:{ pc_raise:($('#pc_raise')||{}).value, pc_small:($('#pc_small')||{}).value, pc_received:($('#pc_received')||{}).value, pc_isdrain:!!($('#pc_isdrain')||{}).checked, pc_price:($('#pc_price')||{}).value }
     },
@@ -5055,6 +5078,7 @@ function restoreSnapshot(s){
   try{ wallParts=(st.wallParts&&st.wallParts.mode)?Object.assign({mode:'auto',topH:null},st.wallParts):{mode:'auto',topH:(st.wallParts&&st.wallParts.topH)||null}; }catch(_){}   /* 모드 없는 저장본 = 기존 방식 */   /* 예전 저장본: 벽체도포 물량 있으면 포함 상태로 */
   Object.keys(TARGETS).forEach(k=>delete TARGETS[k]); Object.assign(TARGETS, st.TARGETS||{});
   materialMult=(st.materialMult!=null)?st.materialMult:1;
+  try{ WORK_NAME_OVR=(st.workNameOvr&&typeof st.workNameOvr==='object')?cloneJ(st.workNameOvr):{}; WORK_ORDER_OVR=Array.isArray(st.workOrderOvr)?st.workOrderOvr.slice():null; }catch(_){ WORK_NAME_OVR={}; WORK_ORDER_OVR=null; }   /* v9.1: 이 현장만 공종 이름·순서 */
   if(st.cross){ Object.keys(crossState).forEach(k=>{ if(st.cross[k]!==undefined) crossState[k]=cloneJ(st.cross[k]); }); }
   crossState.satOcr={}; crossState.satShareUrls={};
   try{ satImagesLoadFor((s&&s.id)?s.id:'__draft__'); }catch(_){ crossState.sat={}; }
@@ -5104,6 +5128,7 @@ function newEstimate(){
   extras=cloneJ(NF_DEFAULT_STATE.extras);
   activeWorks=[]; pcReasons={}; projectAuto=true; materialMult=1;
   try{ wallInclude=false; wallParts={mode:'auto',topH:null}; }catch(e){}
+  try{ WORK_NAME_OVR={}; WORK_ORDER_OVR=null; }catch(e){}
   try{ priceKind='base'; }catch(e){}
   try{ pcChecksByType={}; }catch(e){}
   try{ pcCustom={}; }catch(e){}
@@ -5274,7 +5299,7 @@ async function buildConsultingWorkbook(d){
      (원본 템플릿처럼, 물량 입력 전에도 선택 공법의 일위대가 단가분석이 나오도록) */
   const used=(()=>{ const u0=d.works.filter(w=>w.qty>0 || (typeof activeWorks!=='undefined' && activeWorks.includes(w.key)));
     /* v8.8f: 공종 순서 — 싱글·금속기와가 항상 1번(먼저), 나머지(배수로·슬라브·PVC 등)는 그 뒤 원래 순서. 번호도 1, 2, 3…으로 다시 매김 */
-    const pri=k=>(k==='shingle'?0:(k==='metal'?1:2));
+    const pri=(Array.isArray(WORK_ORDER_OVR)&&WORK_ORDER_OVR.length)?(k=>{ const x=WORK_ORDER_OVR.indexOf(k); return x<0?99:x; }):(k=>(k==='shingle'?0:(k==='metal'?1:2)));   /* v9.1: 현장에서 순서 바꿨으면 그 순서 */
     return u0.map((w,i)=>({w,i})).sort((A,B)=>(pri(A.w.key)-pri(B.w.key))||(A.i-B.i)).map((o,n)=>Object.assign({},o.w,{name:(n+1)+'. '+String(o.w.name||'').replace(/^\s*[0-9]+(-[0-9]+)?\.\s*/,'')})); })();
   const FONT='맑은 고딕', FMT='#,##0', FMT2='#,##0.#####', LIGHT='FFF2EEE4';
   const FMT_Q2='#,##0.00', FMT_Q3='#,##0.000';   /* 물량 표시용 고정 소수 — 기본/할증후 2자리, 산출근거 3자리 */
@@ -5756,8 +5781,8 @@ async function buildConsultingWorkbook(d){
       const rawSum=EBq.reduce((s,b)=>s+baseV(col,b),0);
       let sum, f;
       if(col.noRound){ sum=EBq.reduce((s,b)=>s+(kind==='base'?baseV(col,b):baseV(col,b)*(1+col.sur/100)),0); f=(dataBot>=dataTop)?('SUM('+Lc+dataTop+':'+Lc+dataBot+')'):null; }
-      else if(kind==='base'){ sum=ceilUp(rawSum); f=(dataBot>=dataTop)?('ROUNDUP(SUM('+Lc+dataTop+':'+Lc+dataBot+'),0)'):null; }
-      else { sum=ceilUp(rawSum*(1+col.sur/100)); f=(dataBot>=dataTop)?('ROUNDUP(SUM('+Lc+dataTop+':'+Lc+dataBot+'),0)'):null; }
+      else if(kind==='base'){ sum=roundQ(rawSum); f=(dataBot>=dataTop)?('ROUND(SUM('+Lc+dataTop+':'+Lc+dataBot+'),0)'):null; }
+      else { sum=roundQ(rawSum*(1+col.sur/100)); f=(dataBot>=dataTop)?('ROUND(SUM('+Lc+dataTop+':'+Lc+dataBot+'),0)'):null; }
       cell.value=f?{formula:f, result:sum}:sum;
       if(kind==='base') baseTotAddr[i]=cell.address; else surTotAddr[i]=cell.address;
       cell.numFmt=FMT_Q2; cell.alignment={horizontal:'right',vertical:'middle'};
@@ -8763,7 +8788,7 @@ function nfReissueDialog(site, cards, autoNotes, forced, doneMode){
       $1('rsFile').innerHTML='올라갈 파일: <b style="color:#1E9E5A;">'+esc1(nm)+'</b>'; };
     const anText=()=>{ try{ const d=window.__lastD||compute(); const no=$1('rsNo').value||'1'; const proj=((document.getElementById('project')||{}).value||'').trim();
         const RL={shingle:'싱글',dual:'슬라브',drain:'배수로',metal:'금속기와',pvc:'PVC',metalpaint:'박공지붕'};
-        const rt=((d&&d.works)||[]).filter(w=>w&&w.qty>0&&w.sum>0).map(w=>(RL[w.key]||w.spec||w.name)+' m² 당 '+Math.round(w.sum/w.qty).toLocaleString('ko-KR')+'원');
+        const rt=((d&&d.works)||[]).filter(w=>w&&w.qty>0&&w.sum>0).map(w=>(w.lbl||RL[w.key]||w.spec||w.name)+' m² 당 '+Math.round(w.sum/w.qty).toLocaleString('ko-KR')+'원');
         return no+'안 : #공사내역 : '+(proj||'(공사범위 입력)')+'\n#금액 : '+(rt.join(' / ')||'-')+((d&&d.total)?(' (총 '+Math.round(d.total).toLocaleString('ko-KR')+'원, VAT 별도)'):'')+'\n- 특이사항: '; }catch(e){ return '- 공사내역: \n- 금액: '; } };
     const onType=()=>{ sync(); if(isAn()){ const ta=$1('rsText'); if(ta && (/^- 수정 내용: \s*\n- 특이사항: \s*$/.test(ta.value)||ta.dataset.an==='1')){ ta.value=anText(); ta.dataset.an='1'; } } };
     $1('rsType').onchange=()=>{ if(/검토완료/.test((TYPES[+$1('rsType').value]||[])[0]||'')) $1('rsDone').checked=true; onType(); }; $1('rsDone').onchange=prev; if(pageAn){ $1('rsType').value=String(TYPES.length-1); }
@@ -8799,7 +8824,7 @@ window.sendToReviewBoard = async function(forceRevise, reviewMode){
     let fname; try{ fname=(typeof buildEstimateFileName==='function'?buildEstimateFileName():('내역서_'+(site||'POUR')))+'.xlsx'; } finally { window.__nfFnSuffix=''; }
     /* ★ 공법별 ㎡당 실행단가 (싱글·슬라브·배수로 등) */
     const RATE_LBL={shingle:'싱글',dual:'슬라브',drain:'배수로',metal:'금속기와',pvc:'PVC',metalpaint:'박공지붕'};
-    let rates=((d&&d.works)||[]).filter(w=>w&&w.qty>0&&w.sum>0).map(w=>({label:(RATE_LBL[w.key]||w.spec||w.name), unit:Math.round(w.sum/w.qty)}));
+    let rates=((d&&d.works)||[]).filter(w=>w&&w.qty>0&&w.sum>0).map(w=>({label:(w.lbl||RATE_LBL[w.key]||w.spec||w.name), unit:Math.round(w.sum/w.qty)}));
     /* ★ ㎡당 직접단가 항목(벽체도포 등)도 단가 박스에 — 맨 아래로 */
     try{ (typeof extras!=='undefined'?extras:[]).forEach(e=>{ if(e && e.u==='㎡' && num(e.p)>0 && num(e.q)>0 && !e.preset){ rates.push({label:e.n, unit:Math.round(num(e.p))}); } }); }catch(_){}
     rates=rates.filter((v,i,a)=>v.label && a.findIndex(x=>x.label===v.label)===i);
@@ -8808,7 +8833,7 @@ window.sendToReviewBoard = async function(forceRevise, reviewMode){
     const addr = ((document.getElementById('siteAddr')||{}).value||'').trim();   /* 현장 주소 */
     const dataUrl=await buildEstimateDataURL();
     /* ★ 공사 범위(공법 요약) — 구글시트 로그용 */
-    const scope=((d&&d.works)||[]).filter(w=>w&&w.qty>0&&w.sum>0).map(w=>(RATE_LBL[w.key]||w.spec||w.name)).filter((v,i,a)=>v&&a.indexOf(v)===i).join('·');
+    const scope=((d&&d.works)||[]).filter(w=>w&&w.qty>0&&w.sum>0).map(w=>(w.lbl||RATE_LBL[w.key]||w.spec||w.name)).filter((v,i,a)=>v&&a.indexOf(v)===i).join('·');
     /* ★ 최종금액(총공사비, VAT 별도) — 구글시트 로그용 */
     const finalAmt=(d&&d.total)?(won(d.total)+'원'):'';
     if(!window.NF_DASH||!window.NF_DASH.addReview){ alert('검토 대시보드 모듈을 찾을 수 없습니다.'); return; }
