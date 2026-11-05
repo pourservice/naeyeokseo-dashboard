@@ -1417,7 +1417,7 @@ let EXP_RATE = {};
 /* 공법별 목표 ㎡당 단가 (STEP 2에서 공법 수만큼 자동 생성) */
 let TARGETS = Object.fromEntries(Object.keys(RECIPES_META).map(k=>[k,RECIPES_META[k].def]));
 /* 공법별 할증율 단계 (정의 없는 공법·㎡직접단가는 자유 입력) */
-const SUR_TIERS = { shingle:[15,18,21], metal:[22,25,28], dual:[0,10], drain:[0,10] };
+const SUR_TIERS = { shingle:[15,18,21,0], metal:[22,25,28,0], dual:[0,10], drain:[0,10] };
 function surDefault(work){ return SUR_TIERS[work] ? SUR_TIERS[work][0] : 0; }
 
 /* 자재단가 마스터 (원단가 = 양식가 ÷ 1.25 환산) */
@@ -2147,7 +2147,7 @@ function renderCategories(){
     const tiers=(c.mode==='recipe'&&SUR_TIERS[c.work])?SUR_TIERS[c.work]:null;
     if(tiers && !tiers.includes(num(c.sur))) c.sur=tiers[0];   // 단계 외 값은 기본으로 정규화
     const surCell = tiers
-      ? `<select onchange="updC(${i},'sur',this.value)">${tiers.map((t,ti)=>`<option value="${t}" ${num(c.sur)===t?'selected':''}>${t}%${ti===0?' (기본)':''}</option>`).join('')}</select>`
+      ? `<select onchange="updC(${i},'sur',this.value)">${tiers.map((t,ti)=>`<option value="${t}" ${num(c.sur)===t?'selected':''}>${t}%${ti===0?' (기본)':(t===0?' (경사 없음)':'')}</option>`).join('')}</select>`
       : `<input type="number" class="num" value="${c.sur||0}" oninput="updC(${i},'sur',this.value)">`;
     const workCell = c.mode==='recipe'
       ? `<select onchange="updC(${i},'work',this.value)">`+Object.keys(WORK_OPTIONS).map(w=>`<option value="${w}" ${w===c.work?'selected':''}>${WORK_OPTIONS[w]}</option>`).join('')+`</select>`
