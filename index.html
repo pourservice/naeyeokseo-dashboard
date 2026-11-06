@@ -1369,6 +1369,12 @@ body{padding-left:var(--sidebar-w);padding-top:var(--topbar-h);}
     <button class="btn btn-ghost" onclick="jandiTest()" style="font-size:12px;padding:6px 11px;">🔔 테스트 알림 보내기</button>
     <span id="jandiState" style="font-size:12px;color:var(--ink-faint);"></span>
   </div>
+  <div class="field" style="margin-top:10px;"><label>📧 최종본 메일 발송 알림 — 컨설팅 잔디방 웹훅 URL <span style="text-transform:none;color:var(--ink-faint);font-weight:400;">— 최종본 메일 발송이 끝나면 이 방으로 알림 (비우면 안 보냄)</span></label>
+    <input type="text" id="jandiMailHookIn" placeholder="https://wh.jandi.com/connect-api/webhook/....."></div>
+  <div style="display:flex;gap:8px;align-items:center;margin:-2px 0 4px;">
+    <button class="btn btn-ghost" onclick="jandiMailTest()" style="font-size:12px;padding:6px 11px;">🔔 컨설팅방 테스트 알림</button>
+    <span id="jandiMailState" style="font-size:12px;color:var(--ink-faint);"></span>
+  </div>
   <div class="modal-actions">
     <button class="btn btn-danger" onclick="shareDisconnect()">공유 끄기</button>
     <button class="btn btn-ghost" onclick="closeShare()">닫기</button>
@@ -6695,13 +6701,15 @@ function openShare(){
   document.getElementById('fbCfgIn').value = cfg?JSON.stringify(cfg,null,2):'';
   document.getElementById('shareState').textContent = nfCloud.on?'현재: 연결됨 (팀과 실시간 공유 중)':'현재: 미연결 (이 브라우저에만 저장)';
   try{ document.getElementById('jandiHookIn').value = (localStorage.getItem('nf_jandi_hook')||'')||NF_JANDI_HOOK_DEFAULT; document.getElementById('jandiRelayIn').value = (localStorage.getItem('nf_jandi_relay')||'')||NF_RELAY_DEFAULT; }catch(_){}
+  try{ document.getElementById('jandiMailHookIn').value = nfMailHookUrl(); }catch(_){}
   ov.classList.add('show');
 }
-function saveJandiSettings(){ try{ const h=((document.getElementById('jandiHookIn')||{}).value||'').trim(); const rl=((document.getElementById('jandiRelayIn')||{}).value||'').trim(); localStorage.setItem('nf_jandi_hook',h); localStorage.setItem('nf_jandi_relay',rl); }catch(_){} }
+function saveJandiSettings(){ try{ const h=((document.getElementById('jandiHookIn')||{}).value||'').trim(); const rl=((document.getElementById('jandiRelayIn')||{}).value||'').trim(); localStorage.setItem('nf_jandi_hook',h); localStorage.setItem('nf_jandi_relay',rl); }catch(_){}
+  try{ const mi=document.getElementById('jandiMailHookIn'); if(mi){ const mh=(mi.value||'').trim(); if(mh===NF_JANDI_MAIL_HOOK_DEFAULT) localStorage.removeItem('nf_jandi_hook_mail'); else localStorage.setItem('nf_jandi_hook_mail', mh||'-'); } }catch(_){} }
 function closeShare(){ saveJandiSettings(); const ov=document.getElementById('shareOverlay'); if(ov) ov.classList.remove('show'); }
 /* 잔디 알림 발송 — 팀원 @태그 시 검토 토픽으로 알림 */
-async function jandiNotify(bodyText, info){
-  let hook=nfHookUrl(), relay=nfRelayUrl();
+async function jandiNotify(bodyText, info, hookOverride){
+  let hook=hookOverride||nfHookUrl(), relay=nfRelayUrl();
   if(!hook) return false;
   const payload={ body:bodyText, connectColor:'#2a5ad3', connectInfo: info?[{title:(info.title||'검토 요청'), description:(info.desc||'')}]:[] };
   try{
@@ -6720,6 +6728,13 @@ const NF_RELAY_DEFAULT='https://script.google.com/macros/s/AKfycbxZDl2G6mxMXJwQO
 function nfRelayUrl(){ try{ const v=(localStorage.getItem('nf_jandi_relay')||'').trim(); if(v) return v; }catch(e){} return NF_RELAY_DEFAULT; }
 /* ★ 잔디 웹훅 기본 주소 — 코드에 내장해 모든 기기에서 태그 알림 자동 발송 */
 const NF_JANDI_HOOK_DEFAULT='https://wh.jandi.com/connect-api/webhook/26098605/814384fbf228bf77c59e40b38c795c1c';
+/* v9.2: 최종본 메일 발송 완료 → 컨설팅 잔디방 알림 (검토 토픽과 다른 방) */
+const NF_JANDI_MAIL_HOOK_DEFAULT='https://wh.jandi.com/connect-api/webhook/26098605/18659b6f75f353981c3ec1fb9f154230';
+function nfMailHookUrl(){ try{ const v=(localStorage.getItem('nf_jandi_hook_mail')||'').trim(); if(v==='-') return ''; if(v) return v; }catch(e){} return NF_JANDI_MAIL_HOOK_DEFAULT; }
+async function jandiMailTest(){ saveJandiSettings(); const st=document.getElementById('jandiMailState'); const h=nfMailHookUrl();
+  if(!h){ if(st) st.textContent='먼저 컨설팅방 웹훅 URL을 넣어 주세요.'; return; }
+  if(st) st.textContent='보내는 중…'; await jandiNotify('🔔 최종본 메일 발송 알림 테스트입니다.', {title:'연결 테스트', desc:'이 메시지가 컨설팅 잔디방에 보이면 정상입니다.'}, h); if(st) st.textContent='보냈어요 — 컨설팅방에서 확인해 주세요.'; }
+window.jandiMailTest=jandiMailTest; window.nfMailHookUrl=nfMailHookUrl;
 function nfHookUrl(){ try{ const v=(localStorage.getItem('nf_jandi_hook')||'').trim(); if(v) return v; }catch(e){} return NF_JANDI_HOOK_DEFAULT; }
 /* 카드에 첨부된 내역서 엑셀에서 총공사비(최종금액) 자동 추출 — 수기 카드도 금액이 채워지게 */
 async function nfExtractCardTotal(r){
@@ -7472,6 +7487,8 @@ function nfMailDialog(r,f0){
       const oldSrv=(j.attached===true && sendParts.length>1);   /* 발송 서버가 옛 버전이면 첫 파일만 붙음 */
       const kind=NF_MAIL_TPL[$1('mlTpl').value].label;
       await saveCard('📧 메일 발송 완료\n- 받는 사람: '+to+'\n- 제목: '+$1('mlSubj').value);   /* v8.6: 기록은 간단히 — 받는 사람·제목만 */
+      try{ const mh=nfMailHookUrl(); if(mh && $1('mlTpl').value==='final'){ const who=(typeof lastAuthor!=='undefined'&&lastAuthor)?lastAuthor:'';
+          jandiNotify('📧 최종본 메일 발송 완료 — '+(r.site||'(현장)'), {title:'📧 '+(r.site||'현장')+' 최종본 발송', desc:('받는 사람: '+to+'\n제목: '+$1('mlSubj').value+(r.workNo?('\n작성번호: '+r.workNo):'')+(who?('\n발송: '+who):'')).slice(0,400)}, mh); } }catch(_){}   /* v9.2 */
       /* 발송에 쓴 새 메일 주소는 주소록에 자동 저장(업체 = 카드 요청사) → 다음부터 업체명으로 바로 검색 */
       try{ const o=nfCtGet(); const have=new Set(o.list.map(x=>String(x.e).toLowerCase())); let add=0;
         (to+','+($1('mlCc').value||'')).split(/[,;]/).map(x=>x.trim()).filter(x=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)).forEach(e=>{ if(!have.has(e.toLowerCase())){ have.add(e.toLowerCase()); o.list.push({c:(r.req||r.site||'').trim(), n:'', d:'메일 발송 때 자동 저장', e}); add++; } });
@@ -8810,9 +8827,26 @@ function nfReissueDialog(site, cards, autoNotes, forced, doneMode){
   });
 }
 window.nfReissueDialog=nfReissueDialog;
+/* v9.2: 검토방에 올리기 전 — [발행]을 안 눌렀거나 발행 뒤 고친 게 있으면 알려줌 (발행이력에 안 남아서 작성한 게 날아가는 것 방지) */
+function nfIssuedSame(){ try{
+  const norm=st=>{ const o=Object.assign({},st||{}); delete o.ui; delete o.cross; delete o.workNo; return JSON.stringify(o); };
+  const cur=buildSnapshot(), cs=norm(cur.state), h=loadHistory();
+  const s=loadedReportId?h.find(x=>x.id===loadedReportId):null; if(s&&s.state&&norm(s.state)===cs) return true;
+  const site=(cur.meta&&(cur.meta.client||cur.meta.site))||'';   /* 새로고침 등으로 연결이 끊겨도 — 같은 현장 발행본 중 내용이 똑같은 게 있으면 발행된 걸로 봄 */
+  return h.some(x=>x&&x.state&&((x.meta&&(x.meta.client||x.meta.site))||'')===site && norm(x.state)===cs); }catch(e){ return true; } }
+window.nfIssuedSame=nfIssuedSame;
+function nfCheckIssuedBeforeSend(){
+  if(nfIssuedSame()) return true;
+  const fresh=!loadedReportId;
+  if(confirm('⚠ '+(fresh?'아직 [발행]을 안 눌렀어요.':'발행한 뒤에 고친 내용이 있어요 (아직 발행 안 됨).')+'\n발행하지 않고 올리면 지금 작성한 내용이 발행이력에 남지 않아요.\n\n[확인] 지금 발행하고 → 검토방에 올리기\n[취소] 발행 없이 올릴지 다시 물어보기')){
+    issueReport(); return nfIssuedSame();   /* 발행이 취소되면(교차검토 오류 등) 올리지 않음 */ }
+  return confirm('발행 없이 그냥 검토방에 올릴까요?\n(발행이력에는 저장되지 않아요)');
+}
+window.nfCheckIssuedBeforeSend=nfCheckIssuedBeforeSend;
 window.sendToReviewBoard = async function(forceRevise, reviewMode){
   try{
     if(typeof ExcelJS==='undefined'){ alert('엑셀 라이브러리(ExcelJS) 로딩 필요 — 새로고침 후 다시 시도'); return; }
+    if(!nfCheckIssuedBeforeSend()) return;
     const project=(document.getElementById('project')&&document.getElementById('project').value)||'';
     const client=(document.getElementById('client')&&document.getElementById('client').value)||'';
     const requester=(document.getElementById('requester')&&document.getElementById('requester').value)||'';
