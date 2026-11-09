@@ -7547,7 +7547,7 @@ function nfPreserveLocalFiles(oldR, newR){
 }
 /* 안정적 파일 다운로드 — 큰 data:URL은 Blob으로 변환(브라우저 다운로드 실패 방지) */
 function nfDownloadFile(f){
-  if(!f || !f.url){ toast('이 파일은 아직 이 컴퓨터에 없어요. (원본을 올린 컴퓨터에서 받아주세요)'); return; }
+  if(!f || !f.url || (f.localOnly && String(f.url).indexOf('data:')!==0)){ nfMissingFile(f); return; }
   const url0=String(f.url);
   if(url0.indexOf('gdrive:')===0){   /* Google Drive 공개 파일 → 프로젝트 키로 받아서 저장(구글 로그인 전혀 안 거침) */
     toast('⬇ 다운로드 준비 중…');
@@ -7556,7 +7556,7 @@ function nfDownloadFile(f){
   }
   if(url0.indexOf('rtdb:')===0){   /* Realtime Database 파일 → 받아서 저장 */
     toast('⬇ 다운로드 준비 중…');
-    nfRtdbFetch(url0.slice(5)).then(r=>nfDownloadFile({name:r.name||f.name, url:r.dataUrl})).catch(e=>{ console.error('[dl rtdb]',e); toast('다운로드 실패 — 다시 시도해주세요'); });
+    nfRtdbFetch(url0.slice(5)).then(r=>nfDownloadFile({name:r.name||f.name, url:r.dataUrl})).catch(e=>{ console.error('[dl rtdb]',e); if(/파일 메타 없음/.test(String(e&&e.message||e))) nfMissingFile(f); else toast('다운로드 실패 — 다시 시도해주세요'); });
     return;
   }
   const url=url0, name=f.name||'내역서.xlsx';
@@ -7622,8 +7622,26 @@ function nfEnsurePreviewModal(){
   document.addEventListener('keydown',e=>{ if(e.key==='Escape') m.classList.remove('show'); });
   return m;
 }
+/* v9.3: 서버에 없는 첨부(10월 초 저장 오류로 빠진 예전 파일) — 원본 가진 사람이 다시 올리면 구글 드라이브에 저장돼 모든 PC에서 받기 가능 */
+function nfMissingFile(f){
+  const nm=(f&&f.name)||'첨부파일';
+  if(!confirm('‘'+nm+'’\n\n이 파일은 서버에 저장되지 않은 예전 파일이에요. (10월 초 저장 오류로 빠진 파일)\n그래서 어느 PC에서도 받을 수 없어요.\n\n원본 파일을 가지고 있으면 [확인]을 눌러 다시 올려 주세요.\n다시 올리면 구글 드라이브에 저장되어 모든 직원이 어느 PC에서나 받을 수 있어요.')) return;
+  const inp=document.createElement('input'); inp.type='file'; inp.style.display='none'; document.body.appendChild(inp);
+  inp.onchange=async()=>{ const file=inp.files&&inp.files[0]; inp.remove(); if(!file) return;
+    let card=null, link=null;
+    (reviews||[]).some(r=>(r.comments||[]).some(c=>(c.links||[]).some(l=>{ if(l===f || (l && l.name===f.name && String(l.url||'')===String(f.url||''))){ card=r; link=l; return true; } return false; })));
+    if(!link){ alert('카드에서 이 첨부를 찾지 못했어요. 새로고침 후 다시 시도해 주세요.'); return; }
+    try{ toast('⬆ 올리는 중… '+file.name);
+      const gu=await nfRelayUpload(file, card.id);
+      link.url=gu; link.size=file.size; delete link.localOnly; if(file.name && file.name!==link.name) link.origName=file.name;
+      await save(); try{ render(); }catch(_){} try{ renderDetail(); }catch(_){}
+      alert('다시 올렸어요 — 이제 모든 PC에서 ‘'+link.name+'’을 받을 수 있어요.');
+    }catch(e){ console.error('[reattach]',e); alert('올리기 실패: '+(e&&e.message?e.message:e)+'\n잠시 후 다시 시도해 주세요.'); } };
+  inp.click();
+}
+window.nfMissingFile=nfMissingFile;
 async function nfPreviewFile(f){
-  if(!f || !f.url){ toast('이 파일은 이 컴퓨터에 없습니다 — 원본 올린 PC에서 받거나 스토리지 설정이 필요합니다'); return; }
+  if(!f || !f.url || (f.localOnly && String(f.url).indexOf('data:')!==0)){ nfMissingFile(f); return; }
   const m=nfEnsurePreviewModal(); const body=m.querySelector('.fp-body');
   m.querySelector('.fp-title').textContent=f.name||'첨부파일';
   m.querySelector('.fp-dl').onclick=()=>nfDownloadFile(f);
@@ -7657,6 +7675,7 @@ async function nfPreviewFile(f){
       body.innerHTML='<div class="fp-msg">이 형식('+(ext||'파일')+')은 화면 미리보기를 지원하지 않습니다.<br>위 <b>⬇ 다운로드</b>로 받아서 열어주세요.</div>';
     }
   }catch(e){ console.error('[preview]',e);
+    if(/파일 메타 없음/.test(String(e&&e.message||e))){ m.classList.remove('show'); nfMissingFile(f); return; }
     body.innerHTML='<div class="fp-msg">미리보기를 불러오지 못했습니다. (파일은 정상이에요)<br>위 <b>⬇ 다운로드</b> 또는 <b>↗ 새 탭</b>으로 열어주세요.</div>';
   }
 }
