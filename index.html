@@ -5390,7 +5390,7 @@ async function buildConsultingWorkbook(d){
   try{ const pourId=wb.addImage({base64:POUR_LOGO_POUR_B64, extension:'png'});
     cov.addImage(pourId,{ tl:{col:13.75, row:6.05}, ext:{width:46, height:35.4}, editAs:'oneCell' }); }catch(_){}
   /* 좌측 기본 정보 */
-  cv('B7','▶ 견적일자 :',{size:13}); cov.mergeCells('D7:E7'); cv('D7',dateStr,{size:12});
+  cv('B7','▶ 견적일자 :',{size:13}); cov.mergeCells('D7:E7'); cv('D7',dateStr,{size:12}); try{ const _d7=cov.getCell('D7'); _d7.value={formula:'TODAY()', result:dateStr}; _d7.numFmt='yyyy. m. d.'; }catch(_){}   /* v9.4: 견적일자 = 파일 연 날(오늘) 자동 */
   cv('B8','▶ 발 주 처  :',{size:13}); cv('D8',clientName,{size:12});
   const autoName=(typeof autoProjectName==='function')?(autoProjectName()||''):'';   /* 공사명 = 공종 기반(옥상 금속기와 및 배수로 방수공사) */
   cv('B9','▶ 공 사 명  :',{size:13}); cv('D9',autoName||projectName,{size:12});
@@ -5710,7 +5710,7 @@ async function buildConsultingWorkbook(d){
     if(/^[\d.+\-*/()]+$/.test(s) && (/[+*/()]/.test(s) || /\d-\d/.test(s))) return {f:s, v}; return {f:null, v}; };   /* 1+2 같은 식은 수식 그대로 */
   const qNum=(cell,fv,fmt,sz)=>{ cell.value=(fv&&fv.f)?{formula:fv.f, result:fv.v}:(fv?fv.v:null); cell.numFmt=fmt||FMT_Q3; cell.alignment={horizontal:'right',vertical:'middle'}; cell.font={name:FONT,size:sz||10}; };
   /* ── 오른쪽 산출근거 (먼저 그려서 동별 '합계' 칸 주소를 잡아둠 → 왼쪽 기본 물량이 그 칸을 참조) ── */
-  const rgAddr={}; let RR=topRow;
+  const rgAddr={}; const dongNmAddr={}, baseNmAddr={}; let RR=topRow;   /* v9.4: 동 이름 — 첫 산출근거 머리줄이 원본, 나머지는 수식으로 따라감 */
   const roofCidSet=new Set(qCols.filter(c=>c.kind==='roof').map(c=>c.cid));
   qCols.forEach((col,ci)=>{
     const c=col.cid?categories.find(x=>x.id===col.cid):null;
@@ -5731,7 +5731,7 @@ async function buildConsultingWorkbook(d){
     qsheet.mergeCells(RR,RC0,RR,LASTCOL); const h=qsheet.getCell(RR,RC0); h.value='산 출 근 거'; h.font={name:FONT,bold:true,size:12,color:{argb:'FF0B6B60'}}; h.alignment={horizontal:'center',vertical:'middle'}; fillRow(RR,RC0,LASTCOL,'FFFFFFFF'); qsheet.getRow(RR).height=22; RR++;
     const nm=(col.kind==='base' && !col.unit && col.cid && roofCidSet.has(col.cid)) ? (roofCidSet.size>1?(col.label+' 옥상'):'옥상') : col.label;
     const hc=qsheet.getCell(RR,RC0); hc.value=nm; hc.font={name:FONT,bold:true,size:10}; hc.alignment={horizontal:'left',vertical:'middle',indent:1};
-    EBq.forEach((b,bi)=>{ const cc=qsheet.getCell(RR,RC0+1+bi); cc.value=b.name; cc.font={name:FONT,size:11}; cc.alignment={horizontal:'center',vertical:'middle'}; });   /* 동 이름 칸은 왼쪽 표처럼 흰색(같은 동만 파스텔) */
+    EBq.forEach((b,bi)=>{ const cc=qsheet.getCell(RR,RC0+1+bi); if(dongNmAddr[bi]) cc.value={formula:dongNmAddr[bi], result:b.name}; else { cc.value=b.name; dongNmAddr[bi]=cc.address; } cc.font={name:FONT,size:11}; cc.alignment={horizontal:'center',vertical:'middle'}; });   /* 동 이름 칸은 왼쪽 표처럼 흰색(같은 동만 파스텔) */
     fillRow(RR,RC0,RC0); qsheet.getRow(RR).height=19; RR++;
     const rTop=RR; let aRow=0, pRow=0;
     rows.forEach(rw=>{
@@ -5772,7 +5772,8 @@ async function buildConsultingWorkbook(d){
     for(let c=1;c<=LC;c++){ const cell=qsheet.getCell(R,c); cell.alignment={horizontal:'center',vertical:'middle'}; cell.font={name:FONT,bold:true,size:11}; } fillRow(R,1,LC); qsheet.getRow(R).height=21; R++;
     const dataTop=R;
     EBq.forEach((b,bi)=>{
-      qsheet.getCell(R,1).value=b.name; qsheet.getCell(R,1).alignment={horizontal:"center",vertical:"middle"}; qsheet.getCell(R,1).font={name:FONT,size:11};
+      { const nc=qsheet.getCell(R,1); const src=(kind==='base')?dongNmAddr[bi]:baseNmAddr[bi]; nc.value=src?{formula:src, result:b.name}:b.name; if(kind==='base') baseNmAddr[bi]=nc.address; }   /* v9.4: 기본 물량 동 = 산출근거 동, 할증 후 동 = 기본 물량 동 */
+      qsheet.getCell(R,1).alignment={horizontal:"center",vertical:"middle"}; qsheet.getCell(R,1).font={name:FONT,size:11};
       qCols.forEach((col,i)=>{ const cell=qsheet.getCell(R,i+2); const bv=baseV(col,b);
         if(kind==='base'){ const ra=rgAddr[i+'_'+bi]; cell.value = ra ? {formula:ra, result:bv} : bv; baseAddr[bi+'_'+i]=cell.address; }
         else { const ba=baseAddr[bi+'_'+i], sv=bv*(1+col.sur/100); cell.value = ba ? {formula: ba+'*(1+'+(pctAddr[i]||_numStr(col.sur))+'/100)', result:sv} : sv; }
