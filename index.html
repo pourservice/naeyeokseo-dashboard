@@ -1703,7 +1703,8 @@ function hasAreaFormula(c){ return c && c.mode==='recipe' && c.work && AREA_FORM
 /* 계산면적 = (전체면적 + 둘레 × perim) × mult */
 function calcArea(cid,A,L,isRoof){ const w=workOfCid(cid); const f=(w&&AREA_FORMULA[w])||{perim:0,mult:1}; const pm=(isRoof && f.roofPerim!=null)?f.roofPerim:f.perim; const ml=(w==='drain')?1:(isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1)); return (evalExpr(A)+evalExpr(L)*num(pm))*num(ml||1); }   /* v8.7: 배수로는 5% 할증 없음 */
 const area = (b,cid) => (b && b.dims && b.dims[cid]) ? calcArea(cid,b.dims[cid].A,b.dims[cid].L,false) : num(b && b.areas ? b.areas[cid] : 0);   /* 본체 면적 (전체면적·둘레 입력 시 산식 적용) */
-const roofArea = (b,cid) => (b && b.roofDims && b.roofDims[cid]) ? calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true) : num(b && b.roof ? b.roof[cid] : 0);   /* 옥탑 면적: 옥탑 둘레계수(roofPerim) 적용 */
+const roofOffFor = cid => { try{ const c=(categories||[]).find(x=>x.id===cid); return !!(c && c.mode==='recipe' && AREA_FORMULA[c.work] && AREA_FORMULA[c.work].roof===false); }catch(e){ return false; } };   /* v9.5: '옥탑 칸' 끄면 예전에 넣은 옥탑 값은 계산·엑셀에서 빠짐 (값은 지우지 않고 남겨 둠 — 다시 켜면 그대로) */
+const roofArea = (b,cid) => roofOffFor(cid) ? 0 : (b && b.roofDims && b.roofDims[cid]) ? calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true) : num(b && b.roof ? b.roof[cid] : 0);   /* 옥탑 면적: 옥탑 둘레계수(roofPerim) 적용 */
 const areaEff = (b,cid) => area(b,cid) + roofArea(b,cid);              /* 계산용 합산(본체+옥탑, 같은 공법) */
 /* ===== 엑셀 수식용 — 동별 면적 산출식 문자열 + 정확값 (예: (100+102*0.1)*1.05) ===== */
 function _numStr(n){ n=+n; if(!isFinite(n)) return '0'; return (Math.round(n*1e6)/1e6).toString(); }
