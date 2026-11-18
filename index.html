@@ -1702,18 +1702,19 @@ function evalExpr(v){
 function workOfCid(cid){ const c=categories.find(x=>x.id===cid); return c?c.work:null; }
 function hasAreaFormula(c){ return c && c.mode==='recipe' && c.work && AREA_FORMULA[c.work]; }
 /* 계산면적 = (전체면적 + 둘레 × perim) × mult */
-function calcArea(cid,A,L,isRoof){ const w=workOfCid(cid); const f=(w&&AREA_FORMULA[w])||{perim:0,mult:1}; const pm=(isRoof && f.roofPerim!=null)?f.roofPerim:f.perim; const ml=(w==='drain')?1:(isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1)); return (evalExpr(A)+evalExpr(L)*num(pm))*num(ml||1); }   /* v8.7: 배수로는 5% 할증 없음 */
-const area = (b,cid) => (b && b.dims && b.dims[cid]) ? calcArea(cid,b.dims[cid].A,b.dims[cid].L,false) : num(b && b.areas ? b.areas[cid] : 0);   /* 본체 면적 (전체면적·둘레 입력 시 산식 적용) */
+function nfPOvr(v){ const s=String(v==null?'':v).trim(); if(s==='') return null; const n=+s; return isFinite(n)?n:null; }   /* v9.8: 동별 치켜올림(둘레계수) — 비우면 공통값 */
+function calcArea(cid,A,L,isRoof,pOvr){ const w=workOfCid(cid); const f=(w&&AREA_FORMULA[w])||{perim:0,mult:1}; const _po=nfPOvr(pOvr); const pm=(_po!=null)?_po:((isRoof && f.roofPerim!=null)?f.roofPerim:f.perim); const ml=(w==='drain')?1:(isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1)); return (evalExpr(A)+evalExpr(L)*num(pm))*num(ml||1); }   /* v8.7: 배수로는 5% 할증 없음 */
+const area = (b,cid) => (b && b.dims && b.dims[cid]) ? calcArea(cid,b.dims[cid].A,b.dims[cid].L,false,b.dims[cid].P) : num(b && b.areas ? b.areas[cid] : 0);   /* 본체 면적 (전체면적·둘레 입력 시 산식 적용) */
 const roofOffFor = cid => { try{ const c=(categories||[]).find(x=>x.id===cid); return !!(c && c.mode==='recipe' && AREA_FORMULA[c.work] && AREA_FORMULA[c.work].roof===false); }catch(e){ return false; } };   /* v9.5: '옥탑 칸' 끄면 예전에 넣은 옥탑 값은 계산·엑셀에서 빠짐 (값은 지우지 않고 남겨 둠 — 다시 켜면 그대로) */
-const roofArea = (b,cid) => roofOffFor(cid) ? 0 : (b && b.roofDims && b.roofDims[cid]) ? calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true) : num(b && b.roof ? b.roof[cid] : 0);   /* 옥탑 면적: 옥탑 둘레계수(roofPerim) 적용 */
+const roofArea = (b,cid) => roofOffFor(cid) ? 0 : (b && b.roofDims && b.roofDims[cid]) ? calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true,b.roofDims[cid].P) : num(b && b.roof ? b.roof[cid] : 0);   /* 옥탑 면적: 옥탑 둘레계수(roofPerim) 적용 */
 const areaEff = (b,cid) => area(b,cid) + roofArea(b,cid);              /* 계산용 합산(본체+옥탑, 같은 공법) */
 /* ===== 엑셀 수식용 — 동별 면적 산출식 문자열 + 정확값 (예: (100+102*0.1)*1.05) ===== */
 function _numStr(n){ n=+n; if(!isFinite(n)) return '0'; return (Math.round(n*1e6)/1e6).toString(); }
 function areaFormula(b, cid, isRoof){
   const w=workOfCid(cid); const f=(w&&AREA_FORMULA[w])||{perim:0,mult:1};
-  const pm=(isRoof && f.roofPerim!=null)?f.roofPerim:f.perim;
-  const ml=(w==='drain')?1:(isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1));   /* v8.7: 배수로는 5% 할증 없음 */
   const dim = isRoof ? (b&&b.roofDims&&b.roofDims[cid]) : (b&&b.dims&&b.dims[cid]);
+  const _po=nfPOvr(dim&&dim.P); const pm=(_po!=null)?_po:((isRoof && f.roofPerim!=null)?f.roofPerim:f.perim);   /* v9.8: 동별 치켜올림 */
+  const ml=(w==='drain')?1:(isRoof?(f.roofMult!=null?f.roofMult:(f.mult||1)):(f.mult||1));   /* v8.7: 배수로는 5% 할증 없음 */
   if(dim){
     const A=evalExpr(dim.A), L=evalExpr(dim.L), P=num(pm), M=num(ml||1);
     let expr=_numStr(A);
@@ -2071,6 +2072,7 @@ function renderBuildings(){
           ? `<div class="roofsub"><div class="rlbl">옥탑</div>`
             +`<div class="dimrow"><span class="dlbl">면적(㎡)</span><input type="text" class="num dim-in" value="${rd.A!=null?rd.A:''}" oninput="updRoofDim(${i},'${c.id}','A',this.value)"></div>`
             +(noPerim?'':`<div class="dimrow"><span class="dlbl">둘레(m)</span><input type="text" class="num dim-in" value="${rd.L!=null?rd.L:''}" oninput="updRoofDim(${i},'${c.id}','L',this.value)"></div>`)
+            +(noPerim?'':`<div class="dimrow"><span class="dlbl" title="이 동 옥탑만 둘레계수(치켜올림)를 다르게 — 비우면 공통값">치켜올림</span><input type="text" class="num dim-in" value="${rd.P!=null?rd.P:''}" placeholder="공통 ${(function(){ const f=AREA_FORMULA[c.work]||{}; return num(f.roofPerim!=null?f.roofPerim:f.perim); })()}" oninput="updDimP(${i},'${c.id}',true,this.value)" style="${rd.P!=null&&rd.P!==''?'background:#FFF7E6;':''}"></div>`)
             +`<div class="dimcalc" id="rcalc_${i}_${c.id}">= ${won2(roofArea(b,c.id))} ㎡</div></div>`
           : '';
         const dormerBlock = DORMER_WORKS.includes(c.work)
@@ -2085,6 +2087,7 @@ function renderBuildings(){
           +(roofOk?`<div class="rlbl">옥상</div>`:'')
           +`<div class="dimrow"><span class="dlbl">면적(㎡)</span><input type="text" class="num dim-in" value="${d.A!=null?d.A:''}" oninput="updDim(${i},'${c.id}','A',this.value)"></div>`
           +(noPerim?'':`<div class="dimrow"><span class="dlbl">둘레(m)</span><input type="text" class="num dim-in" value="${d.L!=null?d.L:''}" oninput="updDim(${i},'${c.id}','L',this.value)"></div>`)
+          +(noPerim?'':`<div class="dimrow"><span class="dlbl" title="이 동만 둘레계수(치켜올림)를 다르게 — 비우면 위 면적 계산식 값">치켜올림</span><input type="text" class="num dim-in" value="${d.P!=null?d.P:''}" placeholder="공통 ${num((AREA_FORMULA[c.work]||{}).perim)}" oninput="updDimP(${i},'${c.id}',false,this.value)" style="${d.P!=null&&d.P!==''?'background:#FFF7E6;':''}"></div>`)
           +`<div class="dimcalc" id="calc_${i}_${c.id}">= ${won2(area(b,c.id))} ㎡</div>`
           +roofBlock
           +dormerBlock
@@ -2141,10 +2144,19 @@ function updRoof(i,cid,v){ if(!buildings[i].roof)buildings[i].roof={}; buildings
 function updRoofDim(i,cid,which,v){
   const b=buildings[i]; if(!b.roofDims)b.roofDims={}; if(!b.roofDims[cid])b.roofDims[cid]={A:'',L:''};
   b.roofDims[cid][which]=v;
-  b.roof=b.roof||{}; b.roof[cid]=calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true);   /* 스냅샷 호환용 (옥탑 계수) */
+  b.roof=b.roof||{}; b.roof[cid]=calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true,b.roofDims[cid].P);   /* 스냅샷 호환용 (옥탑 계수) */
   const el=document.getElementById('rcalc_'+i+'_'+cid); if(el) el.textContent='= '+won2(roofArea(b,cid))+' ㎡';
   updSums(); recalc(); refreshWasteRow();
 }
+/* v9.8: 동별 치켜올림(둘레계수) — 이 동만 다르게. 비우면 위 '면적 계산식'의 공통값 */
+function updDimP(i,cid,roof,v){
+  const b=buildings[i]; const k=roof?'roofDims':'dims'; if(!b[k])b[k]={}; if(!b[k][cid])b[k][cid]={A:'',L:''};
+  if(nfPOvr(v)==null) delete b[k][cid].P; else b[k][cid].P=String(v).trim();
+  if(roof){ b.roof=b.roof||{}; b.roof[cid]=calcArea(cid,b.roofDims[cid].A,b.roofDims[cid].L,true,b.roofDims[cid].P); const el=document.getElementById('rcalc_'+i+'_'+cid); if(el) el.textContent='= '+won2(roofArea(b,cid))+' ㎡'; }
+  else { b.areas=b.areas||{}; b.areas[cid]=calcArea(cid,b.dims[cid].A,b.dims[cid].L,false,b.dims[cid].P); const el=document.getElementById('calc_'+i+'_'+cid); if(el) el.textContent='= '+won2(area(b,cid))+' ㎡'; }
+  updSums(); recalc(); refreshWasteRow();
+}
+window.updDimP=updDimP;
 function toggleRoof(on){ showRoof=on; renderBuildings(); }
 function renderCategories(){
   let shown=0;
@@ -2309,7 +2321,7 @@ function updWallDim(i,v){
 function updDim(i,cid,which,v){
   const b=buildings[i]; if(!b.dims)b.dims={}; if(!b.dims[cid])b.dims[cid]={A:'',L:''};
   b.dims[cid][which]=v;
-  b.areas=b.areas||{}; b.areas[cid]=calcArea(cid,b.dims[cid].A,b.dims[cid].L);   /* 스냅샷 호환용 값도 갱신 */
+  b.areas=b.areas||{}; b.areas[cid]=calcArea(cid,b.dims[cid].A,b.dims[cid].L,false,b.dims[cid].P);   /* 스냅샷 호환용 값도 갱신 */
   const el=document.getElementById('calc_'+i+'_'+cid); if(el) el.textContent='= '+won2(area(b,cid))+' ㎡';
   updSums(); recalc(); refreshWasteRow();
 }
@@ -3760,14 +3772,15 @@ function cxNae(tabId,i){
 }
 /* 산출물량 ← CAD 면적·둘레를 견적과 "동일한 공법 산식(AREA_FORMULA)"으로 계산.
    → CAD 면적·둘레가 견적 입력과 같으면 내역서 물량과 정확히 일치(편차 0%). */
-function cxSan(r){
+function cxPOvr(tabId,i){ try{ const b=buildings[i]; const d=b&&b.dims&&b.dims[tabId]; return d?d.P:null; }catch(e){ return null; } }   /* v9.8: 동별 치켜올림을 교차검증에도 같게 */
+function cxSan(r,pOvr){
   if(!r) return null;
   if(r.method==="벽체"){ if(r.L==null) return null; }
   else if(r.A==null) return null;
   const slope=(CX_SLOPE[r.method]&&CX_SLOPE[r.method][r.slope])||1;
   if(r.work && typeof AREA_FORMULA!=='undefined' && AREA_FORMULA[r.work]){
     const f=AREA_FORMULA[r.work];
-    const base=(num(r.A)+num(r.L)*num(f.perim))*num(f.mult||1);
+    const _po=nfPOvr(pOvr); const base=(num(r.A)+num(r.L)*num(_po!=null?_po:f.perim))*num(f.mult||1);
     return base*(1+num(r.sur)/100)*slope;   /* 견적과 동일 산식 + 할증 반영 */
   }
   const g=CX_METHODS[r.method]; if(!g) return null;
@@ -3783,7 +3796,7 @@ function crossBadge(p,kind){ const c=crossCls(p,kind), lbl={ok:'정상',warn:'�
 function crossVerdict(){
   let worst='VERIFIED', any=false, maxDev=0;
   cxTabs().forEach(t=>{ cxRows(t.id).forEach((r,i)=>{
-    const san=cxSan(r), nae=cxNae(t.id,i);
+    const san=cxSan(r,cxPOvr(t.id,i)), nae=cxNae(t.id,i);
     if(san==null||nae==null) return; any=true;
     const p=crossP(nae,san); if(p==null) return;
     maxDev=Math.max(maxDev,Math.abs(p));
@@ -4249,8 +4262,8 @@ function estFill(){
     if(bi<0){ for(var j=0;j<buildings.length;j++){ if(!taken[j]){ bi=j; if(g.name && /^(\d+동|#\d+|)$/.test(String(buildings[j].name||'').trim())) buildings[j].name=g.name; break; } } }
     if(bi<0) return; taken[bi]=1; var b=buildings[bi];
     ['red','green','blue'].forEach(function(fam){ var c=g.cells[fam]; if(!c) return; var t=estMap[fam]; if(!t) return; var cid=cidOf(t.work); if(!cid) return;
-      if(t.roof){ b.roofDims=b.roofDims||{}; b.roofDims[cid]={A:String(c.area),L:String(c.perim)}; b.roof=b.roof||{}; b.roof[cid]=calcArea(cid,c.area,c.perim,true); anyRoof=true; }
-      else { b.dims=b.dims||{}; b.dims[cid]={A:String(c.area),L:String(c.perim)}; b.areas=b.areas||{}; b.areas[cid]=calcArea(cid,c.area,c.perim,false); }
+      if(t.roof){ b.roofDims=b.roofDims||{}; const _oP=b.roofDims[cid]&&b.roofDims[cid].P; b.roofDims[cid]={A:String(c.area),L:String(c.perim)}; if(_oP!=null) b.roofDims[cid].P=_oP; b.roof=b.roof||{}; b.roof[cid]=calcArea(cid,c.area,c.perim,true,_oP); anyRoof=true; }
+      else { b.dims=b.dims||{}; const _oP=b.dims[cid]&&b.dims[cid].P; b.dims[cid]={A:String(c.area),L:String(c.perim)}; if(_oP!=null) b.dims[cid].P=_oP; b.areas=b.areas||{}; b.areas[cid]=calcArea(cid,c.area,c.perim,false,_oP); }
       cnt++;
     });
   });
@@ -4721,7 +4734,7 @@ function crossRenderResults(){
     const catTabs=tabs.filter(x=>x.cat || x.id==='x_옥탑');
     const rows=catTabs.map(x=>{
       return cxRows(x.id).map((r,i)=>{
-        const san=cxSan(r), nae=cxNae(x.id,i), p=crossP(nae,san);
+        const san=cxSan(r,cxPOvr(x.id,i)), nae=cxNae(x.id,i), p=crossP(nae,san);
         const isErr=crossCls(p,'n')==='err';
         return '<tr'+(isErr?' class="row-err"':'')+'><td class="t-left"><b>'+esc0(x.label)+'</b></td><td class="t-left">'+esc0(r.dong)+'</td>'
           +'<td class="t-num">'+(r.A==null?'—':won2(r.A))+'</td><td class="t-num">'+(r.L==null?'—':won2(r.L))+'</td>'
@@ -4751,7 +4764,7 @@ function crossRenderResults(){
       ? '<b>벽체</b> 1차 — 산출 = <b>둘레 × 0.4</b>. 둘레칸에 (배수로둘레 + 옥탑둘레) 합을 넣습니다(면적칸 비움).'
       : '<b>'+esc0(tinfo.label)+'</b> 1차 — CAD <b>면적·둘레</b>로 산출물량을 계산해 <b>내역서 물량</b>과 비교합니다.'+(tinfo.cat?' 내역서 값은 견적 산출에서 자동으로 채워집니다(직접 입력 시 우선).':' 자동화 항목이 아니므로 내역서 값을 직접 입력하세요.');
     const rows=cxRows(cur).map((r,i)=>{
-      const san=cxSan(r), nae=cxNae(cur,i), p=crossP(nae,san);
+      const san=cxSan(r,cxPOvr(cur,i)), nae=cxNae(cur,i), p=crossP(nae,san);
       const isErr=crossCls(p,'n')==='err';
       const mOpts=Object.keys(CX_METHODS).map(m=>'<option'+(m===r.method?' selected':'')+'>'+m+'</option>').join('');
       const sDis=!CX_SLOPE[r.method];
