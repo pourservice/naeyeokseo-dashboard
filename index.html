@@ -1667,7 +1667,8 @@ function syncWall(){
   if(wallInclude) nfEnsureWallRow();
   const i=extras.findIndex(e=>e.n==='벽체도포'); if(i<0) return;
   if(!wallInclude) return;   /* v8.7: 미포함 — 기타공사 '벽체도포'에 직접 넣은 물량은 그대로 두고 기타공사(㎡당 단가)로 */
-  if(extras[i].manualQ) return;
+  /* v9.6: '벽체도포 포함'이면 수량은 항상 동별 벽체 합계(물량산출내역서와 같은 값) — 예전에 손으로 넣은 수량이 남아 엑셀 두 곳이 달라지던 문제 */
+  if(extras[i].manualQ) extras[i].manualQ=false;
   if(!(activeWorks.includes('dual')||activeWorks.includes('drain'))) return;
   const a=wallAreaTotal(); if(a<=0) return;
   const q=Math.round(a*100)/100;
@@ -5598,7 +5599,7 @@ async function buildConsultingWorkbook(d){
   if(d.wallWork){ const w=d.wallWork;
     sectionRow(det,dr,w.name,w.spec); det.getCell(dr,3).value='㎡'; det.getCell(dr,4).value=w.qty; det.getCell(dr,4).numFmt=FMT; det.getCell(dr,3).alignment={horizontal:'center',vertical:'middle'}; det.getCell(dr,4).alignment={horizontal:'right',vertical:'middle'}; dr++;
     const itTop=dr;
-    const whdr=dr-1;
+    const whdr=dr-1; detQty.wall={hdr:whdr, items:[]};   /* v9.6: 벽체도포 수량도 물량산출내역서와 연결 */
     w.items.forEach((it,k)=>{ itemRow(det,dr,'  '+it.n,it.s,'㎡',it.qty,it.cat,it.unit,it.amount,true);
       const bc={'재':6,'노':8,'경':10}[it.cat];
       const lrow=ledRows['wall']&&ledRows['wall'][k];
@@ -5676,7 +5677,7 @@ async function buildConsultingWorkbook(d){
   categories.forEach(c=>{ if(c.mode==='unit') qCols.push({cid:c.id, kind:'base', unit:true, label:c.label, sur:num(c.sur), get:b=>area(b,c.id), fx:b=>wrapF(areaFormula(b,c.id,false))}); });
   /* ★ 벽체도포 포함 시 물량산출내역서에도 한 칸 추가 (둘레 × 높이) */
   if(wallInclude && (typeof wallLedger==='function') && wallLedger()){
-    qCols.push({label:'벽체도포', sur:0, noRound:true, get:b=>wallOfB(b).v, fx:b=>{ const w=wallOfB(b); return { f:w.f, v:w.v }; }});   /* v8.9: 옥상·옥탑 따로 */
+    qCols.push({wallCol:true, label:'벽체도포', sur:0, noRound:true, get:b=>wallOfB(b).v, fx:b=>{ const w=wallOfB(b); return { f:w.f, v:w.v }; }});   /* v8.9: 옥상·옥탑 따로 */
   }
   if(!qCols.length) qCols.push({label:'물량', sur:0, get:()=>0, fx:()=>({f:null,v:0})});
   /* v8.8: 추가 물량(캐노피 등, 이름 자유)도 그 동 기본 물량에 같이 — 뻐꾸기창과 같은 방식(할증까지 적용) */
@@ -5824,6 +5825,8 @@ async function buildConsultingWorkbook(d){
       const f=idx.map(i=>"'물량산출내역서'!"+surTotAddr[i]).join('+')+(da?('+'+_numStr(da)):'');
       if(setFK(det,dq.hdr,4,f,exp)) dq.items.forEach(rr=>setFK(det,rr,4,'$D$'+dq.hdr,w.qty));
     });
+    /* v9.6: 벽체도포 수량 = 물량산출내역서 벽체도포 '전체' 칸 수식 연결 */
+    if(detQty.wall){ const wi=qCols.findIndex(col=>col.wallCol); if(wi>=0 && surTotAddr[wi]){ const dq=detQty.wall; const exp=resOf(surTotAddr[wi]); if(setFK(det,dq.hdr,4,"'물량산출내역서'!"+surTotAddr[wi],exp)) dq.items.forEach(rr=>setFK(det,rr,4,'$D$'+dq.hdr,exp)); else console.warn('[벽체 연결] 값 불일치',exp,cellNum(det.getCell(dq.hdr,4))); } }
     Object.keys(detUnitRow).forEach(cid=>{ const rr=detUnitRow[cid];
       const idx=[]; qCols.forEach((col,i)=>{ if(col.cid===cid && col.unit && surTotAddr[i]) idx.push(i); });
       if(!idx.length) return;
