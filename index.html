@@ -5553,7 +5553,7 @@ async function buildConsultingWorkbook(d){
   });
   /* ★ 벽체도포 일위대가 — 포함 체크 시 추가 (코트재 2회 0.36 / 3회 0.54) */
   if(wallInclude){ const wlg=(typeof wallLedger==='function')?wallLedger():null; if(wlg){
-    sectionRow(led,lr,(wlg.recipe&&wlg.recipe.name)||'POUR 벽체도포',(wlg.recipe&&wlg.recipe.spec)||'슬라브·배수로 벽체'); led.getCell(lr,3).value='㎡'; led.getCell(lr,4).value=1; led.getCell(lr,3).alignment={horizontal:'center',vertical:'middle'}; lr++;
+    sectionRow(led,lr,(used.length+1)+'. '+String((wlg.recipe&&wlg.recipe.name)||'POUR 벽체도포').replace(/^\s*[0-9]+\.\s*/,''),(wlg.recipe&&wlg.recipe.spec)||'슬라브·배수로 벽체'); led.getCell(lr,2).alignment={vertical:'middle',shrinkToFit:true};   /* v9.7: 번호 붙이고 규격 글자는 칸에 맞게 줄여서 다 보이게 */ led.getCell(lr,3).value='㎡'; led.getCell(lr,4).value=1; led.getCell(lr,3).alignment={horizontal:'center',vertical:'middle'}; lr++;
     const wTop=lr;
     wlg.rows.forEach(r=>{ let qv,unit; if(typeof r.price==='number'){ qv=(typeof r.coeff==='number'?r.coeff:1); unit=r.price; } else { qv=1; unit=r.amount; } itemRow(led,lr,'  '+r.n,r.s,r.u,qv,r.cat,unit,r.amount,Number.isInteger(qv)); lr++; });
     const wBot=lr-1;
@@ -5597,7 +5597,7 @@ async function buildConsultingWorkbook(d){
   });
   /* ★ 벽체도포 — 방수공법 아래 별도 공종으로 (재/노/경 나눠서, 일위대가표와 동일) */
   if(d.wallWork){ const w=d.wallWork;
-    sectionRow(det,dr,w.name,w.spec); det.getCell(dr,3).value='㎡'; det.getCell(dr,4).value=w.qty; det.getCell(dr,4).numFmt=FMT; det.getCell(dr,3).alignment={horizontal:'center',vertical:'middle'}; det.getCell(dr,4).alignment={horizontal:'right',vertical:'middle'}; dr++;
+    sectionRow(det,dr,(used.length+1)+'. '+String(w.name).replace(/^\s*[0-9]+\.\s*/,''),w.spec); det.getCell(dr,2).alignment={vertical:'middle',shrinkToFit:true}; det.getCell(dr,3).value='㎡'; det.getCell(dr,4).value=w.qty; det.getCell(dr,4).numFmt=FMT; det.getCell(dr,3).alignment={horizontal:'center',vertical:'middle'}; det.getCell(dr,4).alignment={horizontal:'right',vertical:'middle'}; dr++;
     const itTop=dr;
     const whdr=dr-1; detQty.wall={hdr:whdr, items:[]};   /* v9.6: 벽체도포 수량도 물량산출내역서와 연결 */
     w.items.forEach((it,k)=>{ itemRow(det,dr,'  '+it.n,it.s,'㎡',it.qty,it.cat,it.unit,it.amount,true);
@@ -5623,7 +5623,7 @@ async function buildConsultingWorkbook(d){
       note:(e.preset==='base') ? (String(e.note||'몰탈미포함').replace(/^몰탈포함$/,'몰탈 포함').replace(/^몰탈미포함$/,'몰탈 미포함')) : (e.note||'')}))   /* v7.9: 비고 — 바탕정리 몰탈 포함/미포함 */
   ).filter(x=>x.amt>0||x.q>0);
   if(etcItems.length){
-    sectionRow(det,dr,(used.length+1)+'. 기타공사','기타공사'); dr++;
+    sectionRow(det,dr,(used.length+1+(d.wallWork?1:0))+'. 기타공사','기타공사'); dr++;   /* v9.7: 벽체도포가 있으면 기타공사는 그 다음 번호 */
     const eTop=dr;
     etcItems.forEach(it=>{ itemRow(det,dr,'  '+it.n,it.s,it.u,it.q,'경',it.p,it.amt,true);
       setFK(det,dr,11,'E'+dr+'+G'+dr+'+I'+dr, it.p);   /* 단가 합계 */
