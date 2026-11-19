@@ -6319,6 +6319,29 @@ const NF_DELC_KEY='nf_deleted_comment_ids';
 function nfDelCommentIds(){ try{ const a=JSON.parse(localStorage.getItem(NF_DELC_KEY)||'[]'); return Array.isArray(a)?a.map(String):[]; }catch(e){ return []; } }
 function nfAddDelCommentId(id){ if(id==null) return; try{ const s=new Set(nfDelCommentIds()); s.add(String(id)); let arr=[...s]; if(arr.length>800) arr=arr.slice(arr.length-800); localStorage.setItem(NF_DELC_KEY, JSON.stringify(arr)); }catch(e){} }
 /* 댓글 union — 양쪽 기기에서 단 댓글을 모두 보존(id 기준), 삭제표식은 제외, 시간순 정렬 */
+/* v9.9: 동시 작업 보호 — 카드 전체를 덮어쓰지 않고 '내가 바꾼 칸'만 서버 최신본 위에 얹음 (다른 사람이 같은 때 바꾼 칸은 그대로 보존) */
+function nfIsPlainObj(v){ return !!v && typeof v==='object' && !Array.isArray(v); }
+function nfCardDiff(base, cur, path, ops){
+  ops=ops||[]; path=path||[];
+  const ks=new Set(Object.keys(base||{}).concat(Object.keys(cur||{})));
+  ks.forEach(k=>{
+    if(!path.length && k==='comments') return;               /* 댓글은 따로 합집합으로 합침 */
+    const b=base?base[k]:undefined, c=cur?cur[k]:undefined;
+    if(JSON.stringify(b)===JSON.stringify(c)) return;
+    if(nfIsPlainObj(b) && nfIsPlainObj(c)) nfCardDiff(b, c, path.concat(k), ops);   /* 체크항목처럼 묶음 안의 칸 하나하나 따로 비교 */
+    else ops.push({p:path.concat(k), v:c, del:(c===undefined)});
+  });
+  return ops;
+}
+function nfApplyCardDiff(target, ops){
+  const out=JSON.parse(JSON.stringify(target||{}));
+  (ops||[]).forEach(o=>{
+    let t=out; for(let i=0;i<o.p.length-1;i++){ const k=o.p[i]; if(!nfIsPlainObj(t[k])) t[k]={}; t=t[k]; }
+    const last=o.p[o.p.length-1];
+    if(o.del) delete t[last]; else t[last]=JSON.parse(JSON.stringify(o.v));
+  });
+  return out;
+}
 function nfMergeComments(a,b){
   const del=new Set(nfDelCommentIds());
   /* 첨부 링크 우선순위: gdrive > rtdb > data > 기타 — 동기화 시 더 좋은 링크(구글드라이브)가 항상 이기게(rtdb로 되돌아가는 문제 방지) */
@@ -6372,7 +6395,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-10-06-sync43';
+const APP_VER='2026-11-19-sync44';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6437,8 +6460,24 @@ const nfCloud={
       const remoteMap=new Map();
       snap.forEach(doc=>{ const c=doc.data(); if(c && c.id!=null) remoteMap.set(String(doc.id), c); });
       /* 변경 감지 기준을 원격 현재값으로 갱신 */
+      const _oldSynced=this._synced; const _wasFirst=this._firstCards;
       this._synced=new Map(); remoteMap.forEach((c,id)=>{ this._synced.set(id, JSON.stringify(c)); });
-      const next=[]; remoteMap.forEach(c=>next.push(c));
+      /* v9.9: 아직 서버에 안 올라간 내 수정(체크·메모 등)은 다른 사람 변경이 들어와도 지워지지 않게 — 서버 최신본 + 내가 바꾼 칸 */
+      const _localById=new Map(); (_prev||[]).forEach(r=>{ if(r && r.id!=null) _localById.set(String(r.id), r); });
+      const next=[]; remoteMap.forEach((c,id)=>{
+        try{
+          const loc=_localById.get(id), baseJ=_oldSynced.get(id);
+          if(!_wasFirst && loc && baseJ!=null){
+            const lj=JSON.stringify(loc);
+            if(lj!==baseJ){
+              const base=JSON.parse(baseJ); const ops=nfCardDiff(base, loc);
+              const m=nfApplyCardDiff(c, ops); m.comments=nfMergeComments(c.comments, loc.comments);
+              next.push(m); return;
+            }
+          }
+        }catch(e){ console.warn('[nfCloud] local merge',id,e); }
+        next.push(c);
+      });
       if(this._firstCards){
         /* 첫 스냅샷: 서버를 전적으로 신뢰(세션 밖에서 지워진 카드 되살림 방지). 단, 이번 세션에 만든 로컬 신규 카드는 유지 */
         this._firstCards=false;
@@ -6498,7 +6537,7 @@ const nfCloud={
       if(this._removedIds.has(id)) continue;             /* 방금 삭제한 카드는 다시 쓰지 않음 */
       const j=JSON.stringify(card);
       if(this._synced.get(id)===j) continue;             /* 안 바뀐 카드는 건너뜀 → 평소엔 바뀐 1장만 씀 */
-      try{ await this._writeCard(id, card); this._synced.set(id, j); }
+      try{ await this._writeCard(id, card, this._synced.get(id)); this._synced.set(id, j); }
       catch(e){ console.error('[nfCloud] writeCard',id,(e&&e.code)||e); }
     }
   },
@@ -6509,14 +6548,16 @@ const nfCloud={
     try{ await this.cardsRef().doc(id).delete(); }
     catch(e){ console.error('[nfCloud] deleteCard',id,(e&&e.code)||e); }
   },
-  async _writeCard(id, card){
+  async _writeCard(id, card, baseJ){
     const dref=this.cardsRef().doc(id);
+    let base=null; try{ if(baseJ!=null) base=JSON.parse(baseJ); }catch(_){ base=null; }
     await this.db.runTransaction(async tx=>{
       const snap=await tx.get(dref);
       let merged=card;
       if(snap.exists){
         const rem=snap.data()||{};
-        merged=Object.assign({}, rem, card);
+        /* v9.9: 기준본이 있으면 '내가 바꾼 칸'만 서버 최신본에 얹음 → 같은 카드를 다른 사람이 동시에 고쳐도 서로 안 지워짐 */
+        merged = base ? nfApplyCardDiff(rem, nfCardDiff(base, card)) : Object.assign({}, rem, card);
         merged.comments=nfMergeComments(rem.comments, card.comments);   /* 양쪽 기기 댓글 모두 보존 */
       }
       tx.set(dref, merged);
