@@ -6395,7 +6395,7 @@ const NF_FB_DEFAULT={
 function nfReadCfg(){ try{ const s=localStorage.getItem(FB_CFG_KEY); if(s) return JSON.parse(s); }catch(e){} return (NF_FB_DEFAULT&&NF_FB_DEFAULT.projectId)?NF_FB_DEFAULT:null; }
 /* ===== 자동 버전 갱신 — 새 버전이 배포되면 모든 PC가 옛 캐시를 버리고 최신본을 자동으로 받도록 =====
    (배포할 때마다 APP_VER를 올립니다. 최신본을 연 PC가 이 버전을 클라우드에 올리면, 옛 버전 PC는 감지 후 1회 새로고침) */
-const APP_VER='2026-11-19-sync44';
+const APP_VER='2026-11-24-sync45';
 function nfAutoUpdate(v){
   try{
     if(!v || String(v)<=APP_VER) return;                 // 내가 이미 최신이거나 더 새로움 → 무시
@@ -6781,7 +6781,11 @@ async function jandiNotify(bodyText, info, hookOverride){
 }
 /* v8.8f: @태그된 사람 개인 잔디로 알림 — 회사 n8n이 이름별 개인 토픽 주소로 보냄 (주소는 n8n 안에만 있음) */
 const NF_MENTION_URL='https://nfrnd.app.n8n.cloud/webhook/pour-review-mention';
-function nfMentionNotify(tags, site, text, from){ try{ const to=(tags||[]).map(t=>String(t).replace(/^@/,'')).filter(Boolean); if(!to.length) return;
+/* v9.9a: 개인 알림을 회사 n8n 대신 이 주소로 바로 보낼 사람 (이름 → 개인 잔디 웹훅) */
+const NF_PERSON_HOOKS={ '한준엽':'https://wh.jandi.com/connect-api/webhook/26098605/3f482702fc265c83ea58bb9f129cbfbe' };
+function nfMentionNotify(tags, site, text, from){ try{ let to=(tags||[]).map(t=>String(t).replace(/^@/,'')).filter(Boolean); if(!to.length) return;
+  to.filter(n=>NF_PERSON_HOOKS[n]).forEach(n=>{ try{ jandiNotify('@'+n+' 검토 요청 — '+(site||'(현장)'), {title:'📋 '+(site||'현장')+' 검토 요청', desc:((from?('작성자: '+from+'\n'):'')+String(text||'')).slice(0,300)+'\n'+(location.origin+location.pathname)}, NF_PERSON_HOOKS[n]); }catch(_){} });
+  to=to.filter(n=>!NF_PERSON_HOOKS[n]); if(!to.length) return;
   fetch(NF_MENTION_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to, site:site||'', text:String(text||'').slice(0,1500), from:from||'', link:(location.origin+location.pathname)})}).catch(()=>{}); }catch(_){} }
 try{ window.nfMentionNotify=nfMentionNotify; }catch(_){}
 /* ★ 중계 서버(GAS) 기본 주소 — 코드에 내장해 모든 기기에서 자동 사용 (기기별 설정 없이 항상 기록) */
